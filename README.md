@@ -9,7 +9,9 @@ Relay-Servers hat **zu keinem Zeitpunkt Klartextzugriff** auf Nachrichten.
 
 > ⚠ **Ehrliche Einordnung:** Dies ist ein funktionsfähiger, sicherheitsbewusst
 > gebauter **Prototyp/MVP** — **kein** extern auditiertes Produktionssystem und
-> nicht „unhackbar". Details und bekannte Grenzen: [SECURITY.md](SECURITY.md).
+> nicht „unhackbar". Details und bekannte Grenzen: [SECURITY.md](SECURITY.md)
+> · Architektur, Bedrohungsmodell und Krypto-Begründung ausführlich im
+> [Wiki](../../wiki).
 
 ---
 
@@ -196,12 +198,13 @@ korrekte Standardansatz). Ausführlich in
 renkervault/
 ├── client/                  React + TypeScript + Vite
 │   └── src/
-│       ├── crypto/          ← ALLE Kryptografie, isoliert & kommentiert
+│       ├── crypto/          ← ALLE Kryptografie, isoliert (Begründung im Wiki)
 │       │   ├── primitives.ts   Wrapper um @noble/curves, @noble/hashes,
 │       │   │                   hash-wasm (Argon2id), WebCrypto (AES-GCM)
-│       │   ├── ratchet.ts      Double Ratchet + X3DH-lite (siehe Hinweis!)
+│       │   ├── ratchet.ts      Double Ratchet + X3DH-Hybrid (siehe Wiki: Kryptografie)
 │       │   ├── pq.ts           ML-KEM-768 (Post-Quantum-Hybrid-Handshake)
 │       │   ├── vault.ts        At-Rest-Verschlüsselung + HMAC-Integrität + Duress
+│       │   ├── padding.ts      Nachrichten-Padding auf feste Größenstufen
 │       │   └── safety.ts       Safety Numbers / Fingerprints
 │       ├── net/
 │       │   ├── client.ts       WebSocket-Client (Ed25519-Challenge-Response,
@@ -248,3 +251,21 @@ einbinden (z. B. via Tauri) oder externes Audit. Der Erstkontakt-Handshake
 nutzt zusätzlich `@noble/post-quantum` (ML-KEM-768) für Quantensicherheit —
 ebenfalls eine auditierte Bibliothek, keine eigene PQ-Implementierung.
 Vollständige Liste der Grenzen: [SECURITY.md](SECURITY.md).
+
+## Über dieses Projekt
+
+Ich bin 18 und habe RenkerVault als persönliches Lernprojekt gebaut, um
+Ende-zu-Ende-Verschlüsselung nicht nur zu benutzen, sondern wirklich zu
+verstehen — vom Double-Ratchet-Protokoll über den Post-Quantum-Hybrid-
+Handshake bis zur nativen Windows-Hardware-Bindung (DPAPI) im Tauri-Backend.
+Entwickelt mit Claude Code als KI-Pair-Programmer — genauso wie eine IDE
+oder Dokumentation ein Werkzeug ist, nicht der Ersatz für eigenes
+Verständnis. Ich kann jeden Teil dieses Repos erklären und begründen; das
+Wiki dokumentiert bewusst nicht nur *was* gebaut wurde, sondern *warum*
+(Bedrohungsmodell, Krypto-Komposition, ehrlicher Audit-Status inklusive
+eines selbst gefundenen und behobenen Timing-Seitenkanals).
+
+Was mir dabei besonders wichtig war: nichts als sicherer verkaufen, als es
+ist. Kein „unhackbar", kein externes Audit vorgetäuscht, offene Punkte klar
+benannt statt versteckt — siehe [SECURITY.md](SECURITY.md) und das
+[Wiki](../../wiki).
