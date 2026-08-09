@@ -1,0 +1,40 @@
+# Caddyfile fuer den RenkerVault-Relay.
+# Domain durch die eigene (Sub-)Domain ersetzen, die auf die Server-IP zeigt.
+# Caddy beschafft und erneuert das TLS-Zertifikat automatisch (Let's Encrypt)
+# und leitet WebSocket-Verbindungen transparent an den lokal laufenden
+# Node-Relay weiter — kein zusaetzliches WebSocket-Konfigurations-Flag noetig.
+
+chat.deinedomain.de {
+    reverse_proxy 127.0.0.1:8787
+
+    # DDoS-/Verbindungsflut-Schutz (Haertungs-Roadmap Punkt 9, SECURITY.md
+    # Abschnitt 4 Punkt 12): Der Relay selbst begrenzt bereits pro Socket
+    # (30 Nachrichten/s) und pro IP (20 gleichzeitige Verbindungen), siehe
+    # server/src/index.js — das schuetzt aber nur EIN einzelnes IP-Herkunfts-
+    # muster, nicht verteilte Anfragen ueber viele IPs (echtes DDoS). Vanilla
+    # Caddy hat KEIN eingebautes Rate-Limiting (bewusste Design-Entscheidung
+    # der Caddy-Maintainer) — die Zeile unten braucht das Plugin
+    # github.com/mholt/caddy-ratelimit und einen eigenen Caddy-Build:
+    #
+    #   xcaddy build --with github.com/mholt/caddy-ratelimit
+    #
+    # Danach den `caddy`-Systembefehl durch den selbstgebauten Binary
+    # ersetzen und diesen Block einkommentieren:
+    #
+    # rate_limit {
+    #     zone dynamic_relay {
+    #         key {remote_host}
+    #         events 120
+    #         window 1m
+    #     }
+    # }
+}
+
+# Fuer echten Schutz gegen VERTEILTE Anfragen (viele IPs gleichzeitig) reicht
+# kein Reverse-Proxy-Setting mehr aus — dafuer ist ein vorgelagerter
+# CDN-/DDoS-Schutzdienst (z. B. Cloudflare im "Proxied"-Modus) der
+# realistische Weg, siehe DEPLOYMENT.md, Abschnitt "DDoS-Schutz".
+
+# Optional: Zugriff auf den HTTP-Statusendpunkt zusaetzlich absichern/loggen
+# kann hier ergaenzt werden (z. B. log-Direktive, IP-Allowlist fuer /admin-
+# artige Endpunkte). Der Relay selbst hat aktuell keine solchen Endpunkte.

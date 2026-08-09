@@ -1,0 +1,8 @@
+# Fixiert die Rust-Toolchain fuer reproduzierbare Tauri-Builds — siehe
+# SECURITY.md Abschnitt 4f/4g. Ohne diese Datei koennte `cargo build` auf
+# verschiedenen Maschinen unterschiedliche rustc-Versionen verwenden und
+# damit potenziell unterschiedliche Binaries aus demselben Quellcode
+# erzeugen. Bei Aktualisierung: bewusst pruefen, nicht automatisch "latest".
+[toolchain]
+channel = "1.90.0"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,29 @@
+# Tor-Hidden-Service-Konfiguration fuer den RenkerVault-Relay.
+# ================================================================
+# Macht den Relay ausschliesslich ueber eine .onion-Adresse erreichbar:
+#  - Der Server braucht KEINE oeffentliche IP/Domain und KEIN TLS-Zertifikat
+#    mehr (Tor verschluesselt und authentifiziert den gesamten Kanal selbst).
+#  - Weder der Relay-Betreiber noch ein Netzwerk-Beobachter erfahren die
+#    echte IP-Adresse der Clients — und umgekehrt kennen Clients nicht die
+#    echte IP-Adresse des Servers.
+#  - Erreichbar NUR ueber Tor Browser oder einen Client mit Tor-Anbindung
+#    (z. B. system-weiter Tor-Dienst + SOCKS5-Proxy).
+#
+# Einrichtung (Debian/Ubuntu):
+#   sudo apt install tor
+#   Diese Zeilen an /etc/tor/torrc anhaengen, dann:
+#   sudo systemctl restart tor
+#   sudo cat /var/lib/tor/renkervault/hostname   # zeigt die .onion-Adresse
+
+HiddenServiceDir /var/lib/tor/renkervault/
+HiddenServicePort 80 127.0.0.1:8787
+
+# Der Relay selbst braucht dafuer KEIN TLS (HOST=127.0.0.1, kein
+# TLS_CERT_FILE/TLS_KEY_FILE in der .env) — Tor uebernimmt Verschluesselung
+# und Authentifizierung der gesamten Verbindung bereits auf Netzwerkebene.
+#
+# In der App unter Einstellungen -> Relay-Server:
+#   ws://<deine-onion-adresse>.onion
+# aufrufen — dafuer muss die Verbindung ueber Tor laufen (Tor Browser fuer
+# den Web-Client, oder ein system-weiter Tor-SOCKS5-Proxy fuer die
+# Desktop-/Mobile-App). Siehe DEPLOYMENT.md, Abschnitt "Weg 3".

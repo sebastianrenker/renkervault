@@ -1,0 +1,51 @@
+# Abhaengigkeiten
+node_modules/
+**/node_modules/
+
+# Build-Ausgaben (regenerierbar, siehe client/gen-checksums.mjs fuer Release-Checksummen)
+client/dist/
+client/gen/
+client/src-tauri/target/
+client/src-tauri/gen/schemas/
+client/android/.gradle/
+client/android/build/
+client/android/app/build/
+client/android/capacitor-cordova-android-plugins/
+client/android/local.properties
+client/android/app/src/main/assets/public/
+client/android/app/src/main/assets/capacitor.config.json
+client/android/app/src/main/assets/capacitor.plugins.json
+*.apk
+*.aab
+*.msi
+*.exe
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+SHA256SUMS.txt
+
+# Geheimnisse / lokale Konfiguration — NIEMALS committen
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+
+# Logs
+*.log
+npm-debug.log*
+
+# Rust
+Cargo.lock.bak

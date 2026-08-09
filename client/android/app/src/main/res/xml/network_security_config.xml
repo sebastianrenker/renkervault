@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Erlaubt unverschluesseltes ws:// AUSSCHLIESSLICH fuer localhost/127.0.0.1
+  (Relay auf demselben Geraet) und 10.0.2.2 (Alias des Android-Emulators fuer
+  den Entwicklungsrechner). Fuer jeden anderen Host (echte Domain, LAN-IP
+  eines eigenen Servers usw.) verlangt Android standardmaessig TLS — das
+  entspricht bewusst der App-eigenen Empfehlung, fuer alles außer dem
+  eigenen Geraet zwingend wss:// zu verwenden (siehe SECURITY.md).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+
+    <!--
+      TLS-Zertifikats-Pinning (Härtungs-Roadmap Punkt 7, SECURITY.md
+      Abschnitt 4f/4g) — bewusst NICHT standardmäßig aktiv, siehe Begründung:
+
+      RenkerVault laesst den Relay-Host in den Einstellungen frei waehlen
+      (Settings::relayUrl) — ein <pin-set> in dieser Datei ist aber statisch
+      und an EINE fest einkompilierte Domain gebunden. Ein Pin fuer eine
+      Domain, die noch niemand eingegeben hat, waere bedeutungslos bzw.
+      wuerde bei jedem Relay-Wechsel den kompletten TLS-Verkehr blockieren.
+      Pinning ist deshalb nur fuer Betreiber sinnvoll, die eine eigene,
+      GEBRANDETE App-Variante mit genau EINEM festen Relay ausliefern.
+
+      Fuer diesen Fall: Domain-Zeile einkommentieren, den Platzhalter-Pin
+      durch den echten SPKI-SHA-256-Pin des eigenen Zertifikats ersetzen
+      (mindestens zwei Pins hinterlegen — Backup-Pin fuer die naechste
+      Zertifikatsrotation, sonst sperrt man sich beim naechsten
+      Zertifikatswechsel selbst aus):
+
+        openssl s_client -connect mein-relay.beispiel.de:443 -servername mein-relay.beispiel.de </dev/null 2>/dev/null \
+          | openssl x509 -pubkey -noout \
+          | openssl pkey -pubin -outform der \
+          | openssl dgst -sha256 -binary | openssl enc -base64
+
+      <domain-config>
+          <domain includeSubdomains="false">mein-relay.beispiel.de</domain>
+          <pin-set expiration="2027-01-01">
+              <pin digest="SHA-256">PLATZHALTER_PRIMAERER_PIN==</pin>
+              <pin digest="SHA-256">PLATZHALTER_BACKUP_PIN==</pin>
+          </pin-set>
+      </domain-config>
+
+      Ausserhalb von Android existiert diese Schutzschicht nicht: Weder der
+      Browser-Prototyp noch die Tauri-Desktop-Variante (nutzt das System-
+      WebView, z. B. WebView2 unter Windows) bieten eine oeffentliche API,
+      um TLS-Zertifikate fuer WebSocket-Verbindungen manuell zu pinnen —
+      das ist eine Plattformgrenze, keine Untaetigkeit dieses Projekts.
+    -->
+
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

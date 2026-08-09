@@ -1,0 +1,32 @@
+[Unit]
+Description=RenkerVault Zero-Knowledge Relay
+After=network.target
+
+[Service]
+Type=simple
+User=renkervault
+Group=renkervault
+WorkingDirectory=/opt/renkervault/server
+EnvironmentFile=/opt/renkervault/server/.env
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+
+# Haertung (systemd-Sandbox) — der Relay braucht keinerlei Privilegien,
+# Dateisystemzugriff (außer dem eigenen Arbeitsverzeichnis) oder Netzwerk-
+# Faehigkeiten jenseits des normalen Server-Sockets.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/renkervault/server
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
