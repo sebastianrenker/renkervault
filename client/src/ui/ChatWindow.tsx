@@ -14,8 +14,6 @@ const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const fmtTime = (ts: number) =>
   new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
-/** Deterministische QR-artige Visualisierung der Safety Number (Demo-Optik;
- *  in Produktion ein echter QR-Code mit Scan-Funktion). */
 function QrLike({ data }: { data: string }) {
   const N = 21;
   const cells: boolean[] = [];
@@ -38,9 +36,6 @@ function QrLike({ data }: { data: string }) {
 
 const URL_OR_MENTION = /(https?:\/\/\S+|@\w+)/g;
 
-/** URLs klickbar machen (nie automatisch abrufen — siehe SECURITY.md: keine
- *  Server-seitigen Link-Vorschauen, das würde Metadaten an Dritte leaken) und
- *  @Erwähnungen bekannter Mitglieder hervorheben. */
 function renderRichText(text: string, members: Member[]): ReactNode {
   const parts = text.split(URL_OR_MENTION);
   return parts.map((part, i) => {
@@ -85,6 +80,7 @@ export function ChatWindow(props: {
   onPinMessage: (msgId: string | null) => void;
   onBurnChat: () => void;
   onBack?: () => void;
+  onCall?: (kind: 'audio' | 'video') => void;
 }) {
   const { chat, msgs, identity } = props;
   const [text, setText] = useState('');
@@ -106,7 +102,6 @@ export function ChatWindow(props: {
   }, [msgs.length, props.typingFrom]);
 
   useEffect(() => {
-    // Beim Chatwechsel Entwurfszustände zurücksetzen
     setReplyingTo(null); setEditingId(null); setText(''); setReactPickerFor(null); setBurnConfirm(false);
   }, [chat.id]);
 
@@ -201,6 +196,12 @@ export function ChatWindow(props: {
           )}
         </div>
         <div className="chat-actions">
+          {props.onCall && (
+            <>
+              <button className="iconbtn" onClick={() => props.onCall!('audio')} title="Sprachanruf">📞</button>
+              <button className="iconbtn" onClick={() => props.onCall!('video')} title="Videoanruf">📹</button>
+            </>
+          )}
           <select
             className="input tiny"
             style={{ width: 'auto', padding: '5px 8px' }}
@@ -404,7 +405,6 @@ export function ChatWindow(props: {
         <div className="composer-note">📡 Broadcast-Kanal — nur Owner/Admins können senden. Du liest mit.</div>
       )}
 
-      {/* ---- Modal: Safety Number / Verifikation ---- */}
       {modal === 'safety' && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div className="modal panel" onClick={(e) => e.stopPropagation()}>
@@ -437,7 +437,6 @@ export function ChatWindow(props: {
         </div>
       )}
 
-      {/* ---- Modal: Mitglieder (Gruppen/Kanäle) ---- */}
       {modal === 'members' && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div className="modal panel" onClick={(e) => e.stopPropagation()}>

@@ -10,6 +10,7 @@ import {
   buildDemoWorld, demoEncryptFile, demoPeerReply, demoRotateEpoch,
   demoSendDirect, demoSendSym, restoreDemoSessions,
 } from '../demo/seed';
+import { CallKind, CallSession, newCallId } from '../net/call';
 import { Envelope, RelayClient, RelayStatus } from '../net/client';
 import { realChat } from '../net/realchat';
 import {
@@ -17,6 +18,7 @@ import {
   MemberPermissions, Message, ReplyRef, SecEvent, Settings, ThemeName, VaultData, uid,
 } from '../state/types';
 import { AlarmOverlay } from './Alarm';
+import { CallOverlay } from './CallOverlay';
 import { ChatWindow } from './ChatWindow';
 import { LockVisual } from './LockVisual';
 import { ForwardModal } from './MessageModals';
@@ -31,18 +33,28 @@ type Phase = 'create' | 'unlock' | 'main' | 'lockdown';
 type View = 'chats' | 'contacts' | 'security' | 'settings';
 type Tab = 'all' | 'direct' | 'group' | 'channel' | 'archived';
 
+export interface CallUiState {
+  callId: string;
+  peerId: string;
+  peerName: string;
+  kind: CallKind;
+  direction: 'in' | 'out';
+  status: 'ringing' | 'connecting' | 'connected' | 'ended';
+  muted: boolean;
+  cameraOff: boolean;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  pendingOfferSdp?: RTCSessionDescriptionInit;
+}
+
 const NO_ALARM: AlarmState = { active: false, reason: '', kind: '', ts: 0, lockdown: false };
 
-/** Rohbytes-Obergrenze pro Anhang. Muss unter dem Relay-`maxPayload`
- *  (server/src/index.js, MAX_MSG_BYTES) bleiben — Base64 + JSON-Hülle
- *  blähen die Übertragungsgröße um ca. 35 % auf. */
 const MAX_FILE_BYTES = 1.2 * 1024 * 1024;
 
 function ev(severity: SecEvent['severity'], kind: string, text: string, device?: string): SecEvent {
   return { id: uid('e'), ts: Date.now(), severity, kind, text, device };
 }
 
-/** Vorschau der letzten Nachricht für die Chat-Liste (Telegram-artig). */
 function lastMessagePreview(messages: Message[] | undefined): string {
   if (!messages || messages.length === 0) return 'Keine Nachrichten';
   const m = messages[messages.length - 1];
@@ -52,7 +64,6 @@ function lastMessagePreview(messages: Message[] | undefined): string {
   return (m.own ? 'Du: ' : '') + m.body;
 }
 
-/** Kurzer Sirenenton über WebAudio (opt-in, Einstellungen). */
 function playSiren() {
   try {
     const ctx = new AudioContext();
@@ -70,7 +81,7 @@ function playSiren() {
     osc.start(t0);
     osc.stop(t0 + 2);
     osc.onended = () => ctx.close();
-  } catch { /* Audio nicht verfügbar */ }
+  } catch {}
 }
 
 export default function App() {
@@ -80,23 +91,18 @@ export default function App() {
   const [duress, setDuress] = useState(false);
   const [alarm, setAlarm] = useState<AlarmState>(NO_ALARM);
 
-  // Entsperr-Brute-Force-Zähler (lokal)
   const [fails, setFails] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
-  const pendingEvents = useRef<SecEvent[]>([]); // Events, die vor dem Entsperren anfallen
+  const pendingEvents = useRef<SecEvent[]>([]);
 
-  // Relay
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('offline');
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const relayRef = useRef<RelayClient | null>(null);
 
-  // Stets aktuelle Referenzen für Callbacks, die außerhalb des React-Renderzyklus
-  // (Relay-Events) auf den neuesten Zustand zugreifen müssen (kein Stale-Closure).
   const dataRef = useRef<VaultData | null>(null);
   useEffect(() => { dataRef.current = data; }, [data]);
   const activeChatIdRef = useRef<string | null>(null);
 
-  // UI
   const [view, setView] = useState<View>('chats');
   const [tab, setTab] = useState<Tab>('all');
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -104,35 +110,35 @@ export default function App() {
   const [typingFrom, setTypingFrom] = useState<string | null>(null);
   const [integrityResult, setIntegrityResult] = useState<string | null>(null);
 
-  // Echte Kontakte / Gruppen
   const [showAddContact, setShowAddContact] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [contactBusy, setContactBusy] = useState(false);
   const [contactError, setContactError] = useState('');
   const [groupError, setGroupError] = useState('');
 
-  // Chat-Liste: Suche + Weiterleiten-Dialog
   const [searchQuery, setSearchQuery] = useState('');
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+
+  const [call, setCall] = useState<CallUiState | null>(null);
+  const callSessionRef = useRef<CallSession | null>(null);
+  const callRef = useRef<CallUiState | null>(null);
+  useEffect(() => { callRef.current = call; }, [call]);
 
   useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
 
   const settings: Settings = data?.settings ?? DEFAULT_SETTINGS;
 
-  // ---- Theme & Akzent auf <html> anwenden -------------------------------
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.style.setProperty('--accent', settings.accent);
   }, [settings.theme, settings.accent]);
 
-  // ---- Persistenz: Zustand verschlüsselt sichern (debounced) -------------
   useEffect(() => {
     if (!data || phase !== 'main' || duress) return;
     const t = setTimeout(() => { void saveVault(data); }, 400);
     return () => clearTimeout(t);
   }, [data, phase, duress]);
 
-  // ---- Verschwindende Nachrichten einsammeln -----------------------------
   useEffect(() => {
     if (phase !== 'main') return;
     const t = setInterval(() => {
@@ -152,12 +158,10 @@ export default function App() {
     return () => clearInterval(t);
   }, [phase]);
 
-  // ---- Sicherheitsereignis protokollieren ---------------------------------
   const log = useCallback((e: SecEvent) => {
     setData((d) => (d ? { ...d, secLog: [...d.secLog, e] } : d));
   }, []);
 
-  // ---- Eingehende Nachricht anhängen (bumpt Unread, außer Chat ist offen) --
   const appendMsg = useCallback((chatId: string, m: Message) => {
     setData((d) => d ? {
       ...d,
@@ -177,7 +181,6 @@ export default function App() {
     });
   }, []);
 
-  /** Einzelne Nachricht in-place verändern (Bearbeiten/Löschen/Reagieren). */
   const mutateMessage = useCallback((chatId: string, msgId: string, mutator: (m: Message) => Message) => {
     setData((d) => {
       if (!d) return d;
@@ -187,7 +190,6 @@ export default function App() {
     });
   }, []);
 
-  /** Angeheftete Nachricht lösen, falls sie gerade gelöscht wurde (lokal oder remote). */
   const clearPinIfMatches = useCallback((chatId: string, msgId: string) => {
     setData((d) => {
       if (!d) return d;
@@ -197,7 +199,6 @@ export default function App() {
     });
   }, []);
 
-  /** Präsenz eines echten Kontakts aktualisieren (Best-Effort, siehe SECURITY.md). */
   const updateContactPresence = useCallback((peerId: string, patch: { online?: boolean; lastSeen?: number }) => {
     setData((d) => {
       if (!d || !d.contacts[peerId]) return d;
@@ -205,7 +206,6 @@ export default function App() {
     });
   }, []);
 
-  /** Aktuellen Sitzungs-/Gruppenschlüssel-/OTPK-Zustand der Echt-Engine in den Vault übernehmen. */
   const persistRealSessions = useCallback(() => {
     setData((d) => {
       if (!d) return d;
@@ -220,16 +220,12 @@ export default function App() {
     });
   }, []);
 
-  /** Lokalen One-Time-Prekey-Bestand bei Bedarf auffuellen und (idempotent)
-   *  beim Relay hinterlegen — volles X3DH statt nur wiederverwendetem
-   *  Signed Prekey (siehe net/realchat.ts, SECURITY.md Punkt 2). */
   const topUpAndPublishOtpks = useCallback(() => {
     const created = realChat.topUpOneTimePrekeys();
     if (created.length > 0) persistRealSessions();
     relayRef.current?.publishOneTimePrekeys(realChat.publishableOneTimePrekeys());
   }, [persistRealSessions]);
 
-  // ---- Alarm auslösen ------------------------------------------------------
   const triggerAlarm = useCallback((kind: string, reason: string, opts?: { lockdown?: boolean; device?: string }) => {
     setAlarm({ active: true, kind, reason, ts: Date.now(), lockdown: !!opts?.lockdown });
     const e = ev('alert', kind, `🚨 ${reason}`, opts?.device);
@@ -238,16 +234,11 @@ export default function App() {
     if (opts?.lockdown) setPhase('lockdown');
   }, [phase, log, settings.alarmSound]);
 
-  // ---- Eingehende, echte Envelopes verarbeiten (Gegenstück zum Senden) -----
   const handleDeliver = useCallback(async (rawFrom: string | null, envelope: Envelope) => {
     const d = dataRef.current;
     if (!d) return;
     const myIdentity = d.identity;
 
-    // Sealed Sender: bei Folgenachrichten einer bestehenden Sitzung schickt
-    // der Relay bewusst KEIN "from" mehr mit (siehe server/src/index.js,
-    // Fall 'send') — die Konto-ID wird stattdessen lokal über das
-    // Sealed-Sender-Tag aufgelöst (net/realchat.ts: resolvePeerByTag).
     const from = rawFrom ?? (envelope.tag ? realChat.resolvePeerByTag(envelope.tag) : undefined);
     if (!from) {
       log(ev('warn', 'UNKNOWN_SENDER', 'Nachricht mit nicht auflösbarem Sealed-Sender-Tag verworfen'));
@@ -333,15 +324,9 @@ export default function App() {
         });
         log(ev('warn', 'NEW_CONTACT', `Neue Kontaktanfrage von ${name} (${from})`));
       } else {
-        // Jede erfolgreich entschlüsselte Nachricht ist ein Präsenz-Signal
-        // ("kürzlich aktiv") — der Relay selbst führt keine Präsenzliste.
         updateContactPresence(from, { online: true, lastSeen: envelope.ts || Date.now() });
       }
 
-      // Tarn-Traffic (Härtungs-Roadmap Punkt 4): still verwerfen, kein
-      // UI-Eintrag, kein Unread-Bump — der Ratchet-Schritt selbst wurde
-      // bereits regulär verarbeitet (Präsenz oben, Sitzungszustand unten),
-      // nur die Nachricht selbst ist reine Tarnung ohne Inhalt.
       if (envelope.kind === 'text' && realChat.isCoverTraffic(plaintext)) {
         persistRealSessions();
         return;
@@ -372,6 +357,49 @@ export default function App() {
       }
       if (envelope.kind === 'presence') {
         updateContactPresence(from, { online: envelope.presence === 'online', lastSeen: envelope.ts || Date.now() });
+        persistRealSessions();
+        return;
+      }
+
+      if (envelope.kind === 'call-offer' || envelope.kind === 'call-answer' ||
+          envelope.kind === 'call-ice' || envelope.kind === 'call-hangup') {
+        let payload: any;
+        try { payload = JSON.parse(utf8.dec(plaintext)); } catch { return; }
+        const active = callRef.current;
+
+        if (envelope.kind === 'call-offer') {
+          if (active && active.callId !== payload.callId) {
+            const marker = utf8.enc(JSON.stringify({ callId: payload.callId }));
+            void realChat.encryptDirect(from, myIdentity, marker).then((enc) => {
+              relayRef.current?.sendEnvelope(from, {
+                ct: enc.ct, chatId: from, chatKind: 'direct', kind: 'call-hangup',
+                msgId: uid('m'), ts: Date.now(), fromName: myIdentity.displayName,
+                header: enc.header, x3dh: enc.x3dh, tag: enc.tag,
+              });
+            });
+            return;
+          }
+          const contactName = dataRef.current?.contacts[from]?.name || from;
+          setCall({
+            callId: payload.callId, peerId: from, peerName: contactName, kind: payload.kind,
+            direction: 'in', status: 'ringing', muted: false, cameraOff: false,
+            localStream: null, remoteStream: null, pendingOfferSdp: { type: 'offer', sdp: payload.sdp },
+          });
+          persistRealSessions();
+          return;
+        }
+
+        if (!active || active.callId !== payload.callId) { persistRealSessions(); return; }
+
+        if (envelope.kind === 'call-answer') {
+          void callSessionRef.current?.applyAnswer({ type: 'answer', sdp: payload.sdp });
+        } else if (envelope.kind === 'call-ice') {
+          void callSessionRef.current?.addIceCandidate(payload.candidate);
+        } else if (envelope.kind === 'call-hangup') {
+          callSessionRef.current?.close();
+          callSessionRef.current = null;
+          setCall(null);
+        }
         persistRealSessions();
         return;
       }
@@ -433,9 +461,98 @@ export default function App() {
     }
   }, [log, appendIncoming, mutateMessage, clearPinIfMatches, persistRealSessions, updateContactPresence]);
 
-  /** Präsenz-Signal an alle echten Kontakte mit bestehender Sitzung senden
-   *  (Best-Effort App-Protokoll — der Relay speichert selbst KEINE Präsenz/
-   *  Kontaktliste, siehe SECURITY.md). */
+  const sendCallSignal = useCallback(async (peerId: string, kind: Envelope['kind'], payload: unknown) => {
+    const d = dataRef.current;
+    if (!d) return;
+    const enc = await realChat.encryptDirect(peerId, d.identity, utf8.enc(JSON.stringify(payload)));
+    relayRef.current?.sendEnvelope(peerId, {
+      ct: enc.ct, chatId: peerId, chatKind: 'direct', kind,
+      msgId: uid('m'), ts: Date.now(), fromName: d.identity.displayName,
+      header: enc.header, x3dh: enc.x3dh, tag: enc.tag,
+    });
+    persistRealSessions();
+  }, [persistRealSessions]);
+
+  const startCall = useCallback(async (peerId: string, peerName: string, kind: CallKind) => {
+    if (callRef.current) return;
+    const callId = newCallId();
+    const session = new CallSession(callId, peerId, kind);
+    callSessionRef.current = session;
+    setCall({
+      callId, peerId, peerName, kind, direction: 'out', status: 'connecting',
+      muted: false, cameraOff: false, localStream: null, remoteStream: session.remoteStream,
+    });
+    session.onIceCandidate = (candidate) => { void sendCallSignal(peerId, 'call-ice', { callId, candidate }); };
+    session.onConnectionStateChange = (s) => {
+      if (s === 'connected') setCall((c) => (c && c.callId === callId ? { ...c, status: 'connected' } : c));
+      if (s === 'failed' || s === 'closed') setCall((c) => (c && c.callId === callId ? null : c));
+    };
+    session.onRemoteTrack = () => { setCall((c) => (c && c.callId === callId ? { ...c, remoteStream: session.remoteStream } : c)); };
+    try {
+      await session.startLocalMedia();
+      setCall((c) => (c && c.callId === callId ? { ...c, localStream: session.localStream } : c));
+      const offer = await session.createOffer();
+      await sendCallSignal(peerId, 'call-offer', { callId, kind, sdp: offer.sdp });
+    } catch (e) {
+      log(ev('warn', 'CALL_FAIL', `Anruf an ${peerName} fehlgeschlagen: ${e instanceof Error ? e.message : 'Medienzugriff verweigert'}`));
+      session.close();
+      callSessionRef.current = null;
+      setCall(null);
+    }
+  }, [sendCallSignal, log]);
+
+  const acceptCall = useCallback(async () => {
+    const c = callRef.current;
+    if (!c || !c.pendingOfferSdp || c.direction !== 'in') return;
+    const session = new CallSession(c.callId, c.peerId, c.kind);
+    callSessionRef.current = session;
+    session.onIceCandidate = (candidate) => { void sendCallSignal(c.peerId, 'call-ice', { callId: c.callId, candidate }); };
+    session.onConnectionStateChange = (s) => {
+      if (s === 'connected') setCall((cur) => (cur && cur.callId === c.callId ? { ...cur, status: 'connected' } : cur));
+      if (s === 'failed' || s === 'closed') setCall((cur) => (cur && cur.callId === c.callId ? null : cur));
+    };
+    session.onRemoteTrack = () => { setCall((cur) => (cur && cur.callId === c.callId ? { ...cur, remoteStream: session.remoteStream } : cur)); };
+    try {
+      await session.startLocalMedia();
+      setCall((cur) => (cur && cur.callId === c.callId ? { ...cur, localStream: session.localStream, status: 'connecting' } : cur));
+      const answer = await session.createAnswer(c.pendingOfferSdp);
+      await sendCallSignal(c.peerId, 'call-answer', { callId: c.callId, sdp: answer.sdp });
+    } catch (e) {
+      log(ev('warn', 'CALL_FAIL', `Anruf konnte nicht angenommen werden: ${e instanceof Error ? e.message : 'Medienzugriff verweigert'}`));
+      session.close();
+      callSessionRef.current = null;
+      setCall(null);
+      void sendCallSignal(c.peerId, 'call-hangup', { callId: c.callId });
+    }
+  }, [sendCallSignal, log]);
+
+  const hangupCall = useCallback(() => {
+    const c = callRef.current;
+    if (!c) return;
+    callSessionRef.current?.close();
+    callSessionRef.current = null;
+    setCall(null);
+    void sendCallSignal(c.peerId, 'call-hangup', { callId: c.callId });
+  }, [sendCallSignal]);
+
+  const toggleCallMute = useCallback(() => {
+    setCall((c) => {
+      if (!c) return c;
+      const muted = !c.muted;
+      callSessionRef.current?.setMuted(muted);
+      return { ...c, muted };
+    });
+  }, []);
+
+  const toggleCallCamera = useCallback(() => {
+    setCall((c) => {
+      if (!c) return c;
+      const cameraOff = !c.cameraOff;
+      callSessionRef.current?.setCameraOff(cameraOff);
+      return { ...c, cameraOff };
+    });
+  }, []);
+
   const broadcastPresence = useCallback(async (state: 'online' | 'offline') => {
     const d = dataRef.current;
     if (!d) return;
@@ -449,17 +566,11 @@ export default function App() {
           msgId: uid('m'), ts: Date.now(), fromName: d.identity.displayName,
           header: enc.header, x3dh: enc.x3dh, tag: enc.tag, presence: state,
         });
-      } catch { /* Best-Effort */ }
+      } catch {}
     }
     persistRealSessions();
   }, [persistRealSessions]);
 
-  /** Härtungs-Roadmap Punkt 4 (Tarn-Traffic): eine Dummy-Nachricht an einen
-   *  zufällig gewählten, bereits bekannten Kontakt schicken. Läuft als ganz
-   *  normale kind:'text'-Nachricht (siehe net/realchat.ts:
-   *  COVER_TRAFFIC_MARKER) — für den Relay nicht von einer echten Nachricht
-   *  unterscheidbar, nur der Empfänger erkennt und verwirft sie beim
-   *  Entschlüsseln (handleDeliver unten). */
   const sendCoverTraffic = useCallback(async () => {
     const d = dataRef.current;
     if (!d) return;
@@ -474,14 +585,9 @@ export default function App() {
         header: enc.header, x3dh: enc.x3dh, tag: enc.tag,
       });
       persistRealSessions();
-    } catch { /* Best-Effort, wie broadcastPresence */ }
+    } catch {}
   }, [persistRealSessions]);
 
-  // ---- Tarn-Traffic-Scheduler: Poisson-artig gejittert (Mittelwert ~60 s,
-  // siehe Härtungs-Roadmap Punkt 4 / Kandidat D der Sicherheitserfindungs-
-  // Analyse), damit das Sendemuster kein festes, selbst leicht erkennbares
-  // Zeitraster ergibt. Läuft nur bei Online-Relay, außerhalb des Duress-
-  // Modus und wenn in den Einstellungen aktiv (Standard: an). ------------
   useEffect(() => {
     if (phase !== 'main' || duress || relayStatus !== 'online' || !settings.coverTraffic) return;
     let cancelled = false;
@@ -502,7 +608,6 @@ export default function App() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [phase, duress, relayStatus, settings.coverTraffic, sendCoverTraffic]);
 
-  // ---- Relay-Anbindung ------------------------------------------------------
   useEffect(() => {
     if (phase !== 'main' || !data || duress) return;
     const relay = new RelayClient({
@@ -541,17 +646,12 @@ export default function App() {
     relayRef.current = relay;
     relay.connect(data.identity, data.settings.relayUrl || DEFAULT_RELAY_URL);
     return () => {
-      void broadcastPresence('offline'); // Best-Effort, siehe broadcastPresence
+      void broadcastPresence('offline');
       relay.disconnect();
       relayRef.current = null;
     };
-    // bewusst nur bei Phasenwechsel/Relay-Adressänderung neu verbinden
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, duress, data?.settings.relayUrl]);
 
-  // ==========================================================================
-  // Onboarding / Entsperren
-  // ==========================================================================
   const handleCreate = async (opts: {
     displayName: string; userId: string; passphrase: string; duressPin: string | null;
   }) => {
@@ -569,8 +669,8 @@ export default function App() {
         pqPrekeyPriv: b64.enc(pqPrekey.secretKey), pqPrekeyPub: b64.enc(pqPrekey.publicKey),
         deviceId: uid('dev-'), deviceName: 'Desktop (dieses Gerät)',
       };
-      realChat.hydrate({}, {}); // sauberer Start (falls zuvor ein anderer Vault aktiv war)
-      realChat.topUpOneTimePrekeys(); // initialen Bestand fuer volles X3DH erzeugen
+      realChat.hydrate({}, {});
+      realChat.topUpOneTimePrekeys();
       const world = await buildDemoWorld(identity);
       const vault: VaultData = {
         identity, settings: { ...DEFAULT_SETTINGS },
@@ -595,7 +695,6 @@ export default function App() {
     try {
       const res = await unlockVault<VaultData>(passphrase);
       if (res.ok && res.duress) {
-        // Duress-PIN: leere Fake-Ansicht, echter Tresor bleibt zu
         const fakeIdentity: Identity = {
           userId: 'RV-0000-0000', displayName: 'Operator',
           xPriv: '', xPub: '', edPriv: '', edPub: '', prekeyPriv: '', prekeyPub: '',
@@ -615,18 +714,11 @@ export default function App() {
         return;
       }
       if (res.ok) {
-        // Demo-Sitzungen wiederherstellen (Peer-Identitäten stabil, Epochen frisch)
         const symChats = res.data.chats.filter((c) => c.kind !== 'direct' && c.origin === 'demo');
         const rotated = await restoreDemoSessions(
           res.data.identity, res.data.demoPeerKeys ?? {},
           symChats.map((c) => ({ id: c.id, epoch: c.epoch }))
         );
-        // Echte Sitzungen + Gruppenschlüssel + One-Time-Prekeys unverändert aus
-        // dem Vault laden (im Gegensatz zum Demo-Modus MÜSSEN diese über
-        // Neustarts konsistent bleiben, sonst laufen zwei echte
-        // Gesprächspartner auseinander bzw. verliert man seinen OTPK-Bestand).
-        // "?? {}" faengt Vaults ab, die vor Einfuehrung des vollen X3DH
-        // angelegt wurden und das Feld noch nicht kennen.
         realChat.hydrate(res.data.sessions ?? {}, res.data.groupKeys ?? {}, res.data.oneTimePrekeys ?? {});
         const chats = res.data.chats.map((c) =>
           rotated[c.id]
@@ -654,7 +746,6 @@ export default function App() {
         triggerAlarm('TAMPER', 'Integritätsprüfung fehlgeschlagen — lokale Datenbank wurde manipuliert', { lockdown: true });
         return;
       }
-      // Falsche Passphrase -> Brute-Force-Zählung
       const n = fails + 1;
       setFails(n);
       pendingEvents.current.push(ev('warn', 'AUTH_FAIL', `Fehlgeschlagener Entsperrversuch (${n}/5)`, 'Desktop (dieses Gerät)'));
@@ -669,9 +760,6 @@ export default function App() {
     }
   };
 
-  // ==========================================================================
-  // Echte Kontakte & Gruppen
-  // ==========================================================================
   const handleAddContact = async (userIdInput: string, nameInput: string) => {
     if (!data) return;
     const targetId = userIdInput.trim().toUpperCase();
@@ -686,7 +774,7 @@ export default function App() {
     setContactBusy(true);
     setContactError('');
     try {
-      const res = await relayRef.current.lookup(targetId, true); // true: wir handshaken sofort danach
+      const res = await relayRef.current.lookup(targetId, true);
       if (!res.found || !res.xPub || !res.prekeyPub || !res.pqPrekeyPub) {
         setContactError('Konto nicht gefunden. War die Person schon einmal mit RenkerVault online?');
         return;
@@ -801,12 +889,6 @@ export default function App() {
     rotateRealGroup(chatId, members, `${removedName} entfernt`);
   };
 
-  // ==========================================================================
-  // Nachrichten senden
-  // ==========================================================================
-  /** Owner/Admin-Beschränkung für Broadcast-Kanäle — nicht nur kosmetisch in
-   *  der UI (Composer versteckt sich), sondern auch hier durchgesetzt, damit
-   *  z. B. "Weiterleiten" die Beschränkung nicht umgehen kann. */
   const canPostIn = (chat: Chat): boolean => {
     if (chat.kind !== 'channel' || !data) return true;
     const role = chat.members.find((m) => m.id === data.identity.userId)?.role ?? 'member';
@@ -853,7 +935,6 @@ export default function App() {
       return;
     }
 
-    // --- Demo-Modus (simulierte Peers, unverändert) --------------------------
     const enc = chat.kind === 'direct'
       ? await demoSendDirect(chatId, text)
       : await demoSendSym(chatId, text);
@@ -955,9 +1036,6 @@ export default function App() {
     log(ev('info', 'ATTACH', `Anhang Ende-zu-Ende-verschlüsselt gesendet: ${file.name}`));
   };
 
-  // ==========================================================================
-  // Bearbeiten / Löschen / Reagieren / Weiterleiten / Anheften
-  // ==========================================================================
   const handleEditMessage = async (chatId: string, msgId: string, newText: string) => {
     if (!data) return;
     const chat = data.chats.find((c) => c.id === chatId);
@@ -1049,9 +1127,6 @@ export default function App() {
     if (!m || !data || m.deleted) return;
     if (m.kind === 'file') {
       if (!m.fileDataUrl) {
-        // Nur Bild-/Audio-Anhänge werden lokal als data:-URL vorgehalten
-        // (siehe SECURITY.md) — ein generischer Anhang lässt sich danach
-        // NICHT mehr weiterleiten, da die Rohbytes nirgends gespeichert sind.
         log(ev('warn', 'FORWARD_FAIL', `„${m.fileName ?? 'Anhang'}" kann nicht weitergeleitet werden — nur Bild-/Audio-Anhänge werden dafür lokal vorgehalten`));
         return;
       }
@@ -1069,17 +1144,9 @@ export default function App() {
   };
 
   const handlePinMessage = (chatId: string, msgId: string | null) => {
-    // Bewusst NUR lokal (nicht über den Relay synchronisiert) — hält den
-    // Funktionsumfang der Sitzungs-Envelopes überschaubar; jede Seite pinnt
-    // für sich selbst, wie eine private Lesezeichen-Funktion.
     updateChat(chatId, { pinnedMessageId: msgId });
   };
 
-  /** "Sitzung verbrennen" (inspiriert vom Ephemeral-Chat-Prinzip, z. B.
-   *  OnionShare): Verlauf sofort und unwiderruflich löschen. Bei echten
-   *  1:1-Kontakten zusätzlich die Verschlüsselungssitzung UND den Kontakt
-   *  selbst entfernen — danach bräuchte ein erneuter Kontakt einen
-   *  komplett neuen Handshake, als hätte die Unterhaltung nie stattgefunden. */
   const handleBurnChat = (chatId: string) => {
     if (!data) return;
     const chat = data.chats.find((c) => c.id === chatId);
@@ -1130,9 +1197,6 @@ export default function App() {
     });
   };
 
-  // ==========================================================================
-  // Chat-Verwaltung (Demo)
-  // ==========================================================================
   const updateChat = (chatId: string, patch: Partial<Chat>) => {
     setData((d) => d ? {
       ...d, chats: d.chats.map((c) => (c.id === chatId ? { ...c, ...patch } : c)),
@@ -1178,7 +1242,6 @@ export default function App() {
     rotateChat(chatId, `${name} entfernt`);
   };
 
-  // ---- Dispatcher: demo vs. echt, je nach chat.origin ----------------------
   const rotateChatAny = (chatId: string, reasonText: string) => {
     const chat = data?.chats.find((c) => c.id === chatId);
     if (!chat) return;
@@ -1198,9 +1261,6 @@ export default function App() {
     else handleRemoveMember(chatId, id);
   };
 
-  // ==========================================================================
-  // Sicherheit / Alarm
-  // ==========================================================================
   const runIntegrityCheck = () => {
     const r = checkIntegrity();
     const label = r === 'ok' ? 'OK' : r === 'tampered' ? 'MANIPULIERT' : r.toUpperCase();
@@ -1231,9 +1291,12 @@ export default function App() {
   };
 
   const lockNow = async () => {
-    if (data && !duress) await saveVault(data); // konsistenten Zustand sichern
+    callSessionRef.current?.close();
+    callSessionRef.current = null;
+    setCall(null);
+    if (data && !duress) await saveVault(data);
     lockVault();
-    realChat.hydrate({}, {}); // Sitzungsschlüssel nicht im Speicher halten, während gesperrt
+    realChat.hydrate({}, {});
     setAlarm(NO_ALARM);
     setData(null);
     setDuress(false);
@@ -1242,7 +1305,6 @@ export default function App() {
     setPhase('unlock');
   };
 
-  /** Lockdown-Screen: Vault aus dem intakten RAM-Zustand reparieren. */
   const repairVault = async () => {
     if (!data) { setPhase('unlock'); setAlarm(NO_ALARM); return; }
     await saveVault(data);
@@ -1262,9 +1324,6 @@ export default function App() {
     setPhase('create');
   };
 
-  // ==========================================================================
-  // Abgeleitete Werte & Rendering
-  // ==========================================================================
   const chats = data?.chats ?? [];
   const filteredChats = useMemo(() => {
     let list = chats.filter((c) => (tab === 'archived' ? !!c.archived : !c.archived));
@@ -1338,7 +1397,6 @@ export default function App() {
     );
   }
 
-  // ---- Hauptansicht ---------------------------------------------------------
   const nav: { id: View; ico: string; label: string; tab?: Tab }[] = [
     { id: 'chats', ico: '💬', label: 'Chats', tab: 'direct' },
     { id: 'chats', ico: '⬡', label: 'Gruppen', tab: 'group' },
@@ -1350,7 +1408,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Kopfzeile */}
       <header className="hdr panel">
         <div className="brand">
           <div className="brand-mark">🛡</div>
@@ -1371,7 +1428,6 @@ export default function App() {
       </header>
 
       <div className={`mid ${view === 'chats' && activeChatId ? 'chat-open' : ''}`}>
-        {/* Sidebar */}
         <nav className="nav panel">
           {nav.map((n, i) => (
             <button
@@ -1390,7 +1446,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* Chat-Liste (nur in Chat-Ansicht) */}
         {view === 'chats' && (
           <section className="list panel">
             <div className="list-head">
@@ -1459,7 +1514,6 @@ export default function App() {
           </section>
         )}
 
-        {/* Hauptbereich */}
         {view === 'chats' && (activeChat && data ? (
           <ChatWindow
             chat={activeChat}
@@ -1493,6 +1547,11 @@ export default function App() {
             onPinMessage={(msgId) => handlePinMessage(activeChat.id, msgId)}
             onBurnChat={() => handleBurnChat(activeChat.id)}
             onBack={() => setActiveChatId(null)}
+            onCall={
+              activeChat.kind === 'direct' && activeChat.origin === 'real' && !call
+                ? (kind) => void startCall(activeChat.id, activeChat.name, kind)
+                : undefined
+            }
           />
         ) : (
           <main className="main panel">
@@ -1555,7 +1614,6 @@ export default function App() {
           />
         )}
 
-        {/* Security-Log (rechtes Panel) */}
         <SecurityPanel
           secLog={data?.secLog ?? []}
           relayStatus={relayStatus}
@@ -1566,7 +1624,6 @@ export default function App() {
         />
       </div>
 
-      {/* Untere Leiste */}
       <ThemeBar
         settings={settings}
         onTheme={(t: ThemeName) => setData((d) => d ? { ...d, settings: { ...d.settings, theme: t } } : d)}
@@ -1576,6 +1633,15 @@ export default function App() {
       />
 
       <AlarmOverlay alarm={alarm} onAck={ackAlarm} onLock={lockNow} />
+
+      <CallOverlay
+        call={call}
+        onAccept={() => void acceptCall()}
+        onDecline={hangupCall}
+        onHangup={hangupCall}
+        onToggleMute={toggleCallMute}
+        onToggleCamera={toggleCallCamera}
+      />
 
       {showAddContact && (
         <AddContactModal

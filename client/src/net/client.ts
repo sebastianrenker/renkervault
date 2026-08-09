@@ -1,34 +1,14 @@
-/**
- * Relay-Client (WebSocket zum Zero-Knowledge-Relay, server/src/index.js).
- * ======================================================================
- * Der Relay sieht ausschließlich: Konto-ID, Geräte-Metadaten, öffentliche
- * Schlüssel und opake Envelopes. Authentifizierung passwortlos per
- * Ed25519-Challenge-Response — die Passphrase verlässt den Client nie.
- *
- * Die App funktioniert auch OHNE Relay (lokaler Demo-Modus); der Relay
- * liefert dann zusätzlich: echte Geräteliste, Geräte-Freigabe/-Widerruf,
- * serverseitige Brute-Force-Erkennung, kontoweite Security-Events UND
- * die echte Zustellung Ende-zu-Ende-verschlüsselter Envelopes zwischen
- * echten Nutzern (Kontakte/Gruppen, siehe net/realchat.ts).
- */
 import { b64, edSign } from '../crypto/primitives';
 import { Identity, ReplyRef } from '../state/types';
 
 export type RelayStatus = 'offline' | 'connecting' | 'online' | 'locked';
 
-/** Opakes Envelope, wie es der Relay unverändert weiterreicht (nur Chiffretext
- *  + Routing-Metadaten — niemals Klartext). Felder über 'ct' hinaus dienen
- *  dem EMPFANGENDEN Client dazu, die Nachricht der richtigen Sitzung/Gruppe
- *  zuzuordnen; der Relay selbst interpretiert sie nicht.
- *
- *  'edit' | 'delete' | 'reaction' | 'presence' sind reine Anwendungs-Events,
- *  die wie normale Nachrichten Ende-zu-Ende-verschlüsselt über bestehende
- *  1:1-/Gruppen-Sitzungen laufen (kein separater Server-Mechanismus nötig). */
 export interface Envelope {
   ct: string;
   chatId: string;
   chatKind: 'direct' | 'group';
-  kind: 'text' | 'file' | 'group-key' | 'system' | 'edit' | 'delete' | 'reaction' | 'presence';
+  kind: 'text' | 'file' | 'group-key' | 'system' | 'edit' | 'delete' | 'reaction' | 'presence'
+      | 'call-offer' | 'call-answer' | 'call-ice' | 'call-hangup';
   msgId: string;
   ts: number;
   fromName: string;
@@ -38,22 +18,13 @@ export interface Envelope {
   expiresAt?: number;
   replyTo?: ReplyRef;
   forwardedFrom?: string;
-  targetMsgId?: string;      // Bezug für edit/delete/reaction
-  emoji?: string;            // nur 'reaction'
-  reactionOp?: 'add' | 'remove'; // nur 'reaction'
-  presence?: 'online' | 'offline'; // nur 'presence'
-  header?: { dh: string; pn: number; n: number }; // nur 1:1 (Ratchet)
-  epoch?: number;                                 // nur Gruppe (Epoch-Key)
-  /** Nur allererste 1:1-Nachricht: X3DH-Handshake, hybrid um ML-KEM-768
-   *  ergänzt (pqCt = Kyber-Ciphertext) — siehe crypto/pq.ts. otpkId verweist
-   *  auf den beim Lookup verbrauchten One-Time-Prekey des Empfängers
-   *  (volles X3DH, siehe net/realchat.ts) — fehlt er, war beim Lookup
-   *  keiner mehr verfügbar und der Handshake nutzt nur den Signed Prekey. */
+  targetMsgId?: string;
+  emoji?: string;
+  reactionOp?: 'add' | 'remove';
+  presence?: 'online' | 'offline';
+  header?: { dh: string; pn: number; n: number };
+  epoch?: number;
   x3dh?: { ephPub: string; identityPub: string; pqCt: string; otpkId?: string };
-  /** Sealed-Sender-Tag für 1:1-Folgenachrichten (net/realchat.ts:
-   *  deriveSessionTag) — der Relay routet damit statt anhand der Konto-ID
-   *  des Absenders und liefert dann `from: null` aus (server/src/index.js,
-   *  Fall 'send'). Nur ab der zweiten Nachricht einer Sitzung gesetzt. */
   tag?: string;
 }
 
@@ -64,9 +35,6 @@ export interface LookupResult {
   xPub: string | null;
   prekeyPub: string | null;
   pqPrekeyPub: string | null;
-  /** Nur gesetzt, wenn forHandshake=true angefragt wurde UND der Relay noch
-   *  einen unverbrauchten One-Time-Prekey auf Lager hatte. Der Relay merkt
-   *  sich diesen Prekey NICHT mehr, sobald er einmal herausgegeben wurde. */
   otpk: { id: string; pub: string } | null;
 }
 
@@ -78,11 +46,6 @@ export interface RelayEvents {
     createdAt: number; lastSeen: number; online: boolean; current: boolean;
   }>): void;
   onRevoked(): void;
-  /** Echte, verschlüsselte Nachricht eines anderen Nutzers zugestellt.
-   *  `from` ist NULL bei Sealed-Sender-Folgenachrichten (envelope.tag
-   *  gesetzt) — der Empfänger löst die Konto-ID dann selbst über
-   *  realChat.resolvePeerByTag(envelope.tag) auf, statt sich auf den Relay
-   *  zu verlassen (siehe net/realchat.ts). */
   onDeliver(from: string | null, envelope: Envelope): void;
 }
 
@@ -99,7 +62,6 @@ export class RelayClient {
     this.events = events;
   }
 
-  /** @param relayUrl ws(s)://host:port des Relays — konfigurierbar in den Einstellungen. */
   connect(identity: Identity, relayUrl: string): void {
     this.identity = identity;
     this.setStatus('connecting');
@@ -129,7 +91,6 @@ export class RelayClient {
       try { msg = JSON.parse(String(ev.data)); } catch { return; }
       switch (msg.type) {
         case 'challenge': {
-          // Besitz des Ed25519-Keys beweisen, ohne Geheimnis zu übertragen
           const sig = edSign(b64.dec(msg.nonce), b64.dec(identity.edPriv));
           this.send({ type: 'proof', sig: b64.enc(sig) });
           break;
@@ -177,14 +138,13 @@ export class RelayClient {
       }
     };
 
-    ws.onerror = () => { /* onclose folgt */ };
+    ws.onerror = () => {};
     ws.onclose = () => {
       if (this.status !== 'locked') this.setStatus('offline');
       this.ws = null;
     };
   }
 
-  /** Lokalen Entsperr-Fehlversuch an den Relay melden (kontenweite Zählung). */
   reportUnlockFail(deviceName: string): void {
     this.send({ type: 'report-unlock-fail', device: deviceName });
   }
@@ -193,12 +153,6 @@ export class RelayClient {
     this.send({ type: 'send', to, envelope });
   }
 
-  /** Öffentliche Schlüssel eines Kontos abfragen (für Kontakt hinzufügen).
-   *  forHandshake=true NUR setzen, wenn direkt im Anschluss tatsächlich ein
-   *  Erstkontakt-Handshake stattfindet (beginSession) — nur dann verbraucht
-   *  der Relay einen One-Time-Prekey aus dem Bestand der Gegenseite. Ein
-   *  reiner Info-Lookup (z. B. Kontaktname beim Empfang einer neuen
-   *  Nachricht auffrischen) soll keinen wertvollen Einmal-Prekey verbrauchen. */
   lookup(userId: string, forHandshake = false): Promise<LookupResult> {
     return new Promise((resolve) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -216,8 +170,6 @@ export class RelayClient {
     });
   }
 
-  /** Eigene, noch unverbrauchte One-Time-Prekeys (idempotent) beim Relay
-   *  hinterlegen — siehe net/realchat.ts: topUpOneTimePrekeys(). */
   publishOneTimePrekeys(keys: { id: string; pub: string }[]): void {
     if (keys.length === 0) return;
     this.send({ type: 'publish-otpks', keys });
