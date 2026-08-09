@@ -4,7 +4,6 @@ import { DeviceInfo, Identity } from '../state/types';
 
 const fmt = (ts: number) => new Date(ts).toLocaleString('de-DE');
 
-/** Sicherheitszentrale: Geräte/Sessions, Integritätsprüfung, Krypto-Info. */
 export function SecurityCenter(props: {
   identity: Identity;
   devices: DeviceInfo[];

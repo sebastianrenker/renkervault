@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Contact } from '../state/types';
 
-/** Echten Kontakt über den Relay finden (Konto-ID) und Sitzung anlegen. */
 export function AddContactModal(props: {
   busy: boolean;
   error: string;
@@ -44,7 +43,6 @@ export function AddContactModal(props: {
   );
 }
 
-/** Echte Gruppe aus bestehenden, echten Kontakten erstellen. */
 export function CreateGroupModal(props: {
   contacts: Contact[];
   busy: boolean;

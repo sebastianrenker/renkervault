@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { newUserId } from '../state/types';
 
-/** Konto anlegen — OHNE Telefonnummer: lokal generierte ID + Passphrase.
- *  Optional: Duress-/Notfall-PIN für die Fake-Ansicht. */
 export function CreateVault(props: {
   onCreate: (opts: { displayName: string; userId: string; passphrase: string; duressPin: string | null }) => void;
   busy: boolean;
@@ -59,7 +57,6 @@ export function CreateVault(props: {
   );
 }
 
-/** Entsperr-Screen mit Brute-Force-Erkennung (5 Fehlversuche → Lockout+Alarm). */
 export function UnlockVault(props: {
   onUnlock: (passphrase: string) => void;
   busy: boolean;

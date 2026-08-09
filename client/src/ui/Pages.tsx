@@ -1,11 +1,6 @@
 import { useState } from 'react';
 import { Chat, Identity, Settings } from '../state/types';
 
-/** Warnt, wenn eine unverschlüsselte ws://-Verbindung zu einem NICHT-lokalen
- *  Host konfiguriert wird — dann läuft der Handshake/die Metadaten-Übertragung
- *  im Klartext über das Internet (der Nachrichteninhalt bleibt zwar durch die
- *  E2E-Verschlüsselung geschützt, aber Transport-Metadaten und der initiale
- *  Handshake nicht). Siehe SECURITY.md. */
 function isInsecureRemoteRelay(url: string): boolean {
   try {
     const u = new URL(url);
@@ -16,7 +11,6 @@ function isInsecureRemoteRelay(url: string): boolean {
   }
 }
 
-/** Kontakte: Verifikationsstatus & Fingerprints aller 1:1-Beziehungen. */
 export function ContactsPage(props: {
   chats: Chat[];
   myUserId: string;
@@ -67,7 +61,6 @@ export function ContactsPage(props: {
   );
 }
 
-/** Einstellungen: Privatsphäre-Optionen (Lesebestätigung/Tippindikator opt-in). */
 export function SettingsPage(props: {
   settings: Settings;
   identity: Identity;

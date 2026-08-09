@@ -1,6 +1,5 @@
 import { Chat, Message } from '../state/types';
 
-/** Zielauswahl zum Weiterleiten einer Nachricht (Text oder Datei). */
 export function ForwardModal(props: {
   message: Message;
   chats: Chat[];

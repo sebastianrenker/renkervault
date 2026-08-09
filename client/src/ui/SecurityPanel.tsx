@@ -1,5 +1,3 @@
-/** Rechtes Panel: "Security Log" — Live-Feed aller Sicherheitsereignisse
- *  plus Verbindungs-/Geräte-/Rotations-Status (statt Activity-Log). */
 import { RelayStatus } from '../net/client';
 import { SecEvent } from '../state/types';
 

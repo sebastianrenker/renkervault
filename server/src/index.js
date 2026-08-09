@@ -1,19 +1,3 @@
-/**
- * RenkerVault Relay Server ("Zero-Knowledge"-Relay)
- * =================================================
- * SICHERHEITSMODELL:
- *  - Dieser Server sieht und speichert NIEMALS Klartext von Nachrichten.
- *  - Er kennt nur: Konto-IDs, oeffentliche Schluessel, Geraete-Metadaten
- *    und opake, Ende-zu-Ende-verschluesselte Envelopes (Chiffretext).
- *  - Authentifizierung erfolgt passwortlos per Ed25519-Challenge-Response:
- *    der Server erhaelt nie eine Passphrase, nur Signaturen.
- *  - Nachrichten fuer Offline-Empfaenger werden nur als Chiffretext
- *    im Arbeitsspeicher zwischengespeichert (Prototyp; kein Persistenz-Layer).
- *
- * PROTOTYP-HINWEIS: In Produktion gehoeren Konten-/Routing-Metadaten in
- * PostgreSQL und die Offline-Queue in einen persistenten Store. Fuer den
- * lokal startbaren Prototyp wird bewusst In-Memory-State verwendet.
- */
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -21,56 +5,32 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { ed25519 } from '@noble/curves/ed25519';
 
-// ---------------------------------------------------------------------------
-// Konfiguration (Umgebungsvariablen — siehe deploy/.env.example)
-// ---------------------------------------------------------------------------
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const HOST = process.env.HOST || '0.0.0.0';
 const TLS_CERT_FILE = process.env.TLS_CERT_FILE || '';
 const TLS_KEY_FILE = process.env.TLS_KEY_FILE || '';
-// Hinter einem Reverse-Proxy (Caddy/nginx) steht die echte Client-IP in
-// X-Forwarded-For; nur aktivieren, wenn der Proxy vertrauenswuerdig ist,
-// sonst koennten Clients ihre eigene IP vortaeuschen (Rate-Limit-Umgehung).
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
-// ---------------------------------------------------------------------------
-// In-Memory-State (nur Metadaten + Chiffretext, nie Klartext)
-// ---------------------------------------------------------------------------
-/** userId -> { devices: Map<deviceId, DeviceRecord>, queue: Envelope[] } */
 const users = new Map();
-/** userId -> { fails: number[], lockedUntil: number } (Brute-Force-Erkennung) */
 const authGuard = new Map();
-/** ws -> { userId, deviceId, authed } */
 const sockets = new Map();
-/** IP -> Anzahl aktuell offener Sockets (Basisschutz gegen Verbindungsflut) */
 const connsByIp = new Map();
-/** Konto-ID -> Zeitstempel gesendeter Nachrichten (kontoweites Rate-Limit,
- *  UNABHAENGIG vom Pro-Socket-Limit — verhindert, dass ein Konto mit vielen
- *  gleichzeitig verbundenen Geraeten das Pro-Socket-Limit einfach durch
- *  mehr Sockets umgeht und z. B. die Warteschlange eines Ziel-Kontos flutet). */
 const sendRateByAccount = new Map();
-/** Konto-ID -> Zeitstempel von Lookups MIT forHandshake=true. Begrenzt einen
- *  gezielten "One-Time-Prekey-Exhaustion"-Angriff: Ohne dieses Limit koennte
- *  ein boeswilliger Akteur den kompletten OTPK-Bestand eines Opfers durch
- *  schnell wiederholte Lookups verbrauchen (Kapitel "Volles X3DH", siehe
- *  net/realchat.ts) und dessen kuenftige Handshakes so dauerhaft auf die
- *  schwaechere 2-DH-Variante zwingen. Normale Nutzung (neue Kontakte
- *  hinzufuegen) braucht dieses Limit nie auszureizen. */
 const otpkLookupRate = new Map();
 
-const FAIL_WINDOW_MS = 5 * 60 * 1000; // 5 Minuten
-const FAIL_LIMIT = 5;                 // 5 Fehlversuche -> Lockout
-const LOCKOUT_MS = 60 * 1000;         // 60 Sekunden Lockout
-const MAX_QUEUE = 500;                // Offline-Queue-Limit pro Nutzer
-const MAX_MSG_BYTES = 2 * 1024 * 1024; // 2 MB pro Envelope (Anhaenge/Sprachnachrichten inline, Base64+JSON-Aufschlag eingerechnet)
-const MAX_CONNS_PER_IP = 20;          // Basisschutz gegen Verbindungsflut von einer IP
-const AUTH_TIMEOUT_MS = 15 * 1000;    // Unauthentifizierte Sockets nach 15s trennen
-const MAX_OTPK_PER_DEVICE = 100;      // Obergrenze fuer den One-Time-Prekey-Bestand eines Geraets
-const MAX_OTPK_PER_PUBLISH = 50;      // Obergrenze pro einzelner publish-otpks-Nachricht
-const SEND_RATE_WINDOW_MS = 60 * 1000; // Zeitfenster fuer das kontoweite Sende-Limit
-const SEND_RATE_LIMIT = 300;           // max. Nachrichten pro Konto und Zeitfenster (~5/s im Schnitt)
-const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000; // Zeitfenster fuer das Handshake-Lookup-Limit
-const OTPK_LOOKUP_RATE_LIMIT = 20;     // max. forHandshake-Lookups pro Konto und Zeitfenster
+const FAIL_WINDOW_MS = 5 * 60 * 1000;
+const FAIL_LIMIT = 5;
+const LOCKOUT_MS = 60 * 1000;
+const MAX_QUEUE = 500;
+const MAX_MSG_BYTES = 2 * 1024 * 1024;
+const MAX_CONNS_PER_IP = 20;
+const AUTH_TIMEOUT_MS = 15 * 1000;
+const MAX_OTPK_PER_DEVICE = 100;
+const MAX_OTPK_PER_PUBLISH = 50;
+const SEND_RATE_WINDOW_MS = 60 * 1000;
+const SEND_RATE_LIMIT = 300;
+const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
+const OTPK_LOOKUP_RATE_LIMIT = 20;
 
 const b64 = {
   dec: (s) => Uint8Array.from(Buffer.from(s, 'base64')),
@@ -78,8 +38,6 @@ const b64 = {
 
 function now() { return Date.now(); }
 
-/** Generisches Sliding-Window-Rate-Limit: true = erlaubt (und mitgezaehlt),
- *  false = Limit erreicht (Aufruf wird NICHT mitgezaehlt). */
 function checkRate(map, key, limit, windowMs) {
   const t = now();
   let hits = map.get(key);
@@ -105,7 +63,6 @@ function guard(userId) {
   return g;
 }
 
-/** Sendet an alle authentifizierten Sockets eines Nutzers. */
 function toUser(userId, msg, exceptWs = null) {
   const data = JSON.stringify(msg);
   for (const [ws, meta] of sockets) {
@@ -119,15 +76,10 @@ function send(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
-/** Sicherheitsereignis an alle Geraete eines Kontos melden. */
 function securityEvent(userId, kind, detail) {
   toUser(userId, { type: 'security-event', kind, detail, ts: now() });
 }
 
-/**
- * Registriert einen Auth-Fehlversuch. Loest bei Ueberschreitung
- * des Limits einen Lockout + Alarm-Broadcast aus.
- */
 function recordAuthFail(userId, deviceHint) {
   const g = guard(userId);
   const t = now();
@@ -147,9 +99,6 @@ function recordAuthFail(userId, deviceHint) {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// HTTP + WebSocket
-// ---------------------------------------------------------------------------
 const useTls = !!(TLS_CERT_FILE && TLS_KEY_FILE);
 
 function requestHandler(req, res) {
@@ -164,7 +113,6 @@ const server = useTls
 
 const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_BYTES });
 
-/** Client-IP ermitteln — respektiert X-Forwarded-For nur, wenn TRUST_PROXY gesetzt ist. */
 function clientIp(req) {
   if (TRUST_PROXY) {
     const fwd = req.headers['x-forwarded-for'];
@@ -186,14 +134,11 @@ wss.on('connection', (ws, req) => {
   const meta = { userId: null, deviceId: null, authed: false, nonce: null, msgTimes: [], ip };
   sockets.set(ws, meta);
 
-  // Sockets, die sich nie authentifizieren, nach kurzer Zeit trennen
-  // (verhindert offene, ungenutzte Verbindungen als Ressourcen-Bindung).
   const authTimer = setTimeout(() => {
     if (!meta.authed) ws.close();
   }, AUTH_TIMEOUT_MS);
 
   ws.on('message', (raw) => {
-    // Einfaches Rate-Limit pro Socket (30 Nachrichten/Sekunde)
     const t = now();
     meta.msgTimes = meta.msgTimes.filter((x) => t - x < 1000);
     meta.msgTimes.push(t);
@@ -225,7 +170,6 @@ wss.on('connection', (ws, req) => {
 
 function handle(ws, meta, msg) {
   switch (msg.type) {
-    // -- Schritt 1: Client meldet sich mit Konto/Geraet + oeffentlichen Schluesseln --
     case 'hello': {
       const { userId, deviceId, deviceName, edPub, xPub, prekeyPub, pqPrekeyPub } = msg;
       if (!userId || !deviceId || !edPub || !xPub) return send(ws, { type: 'error', error: 'bad-hello' });
@@ -247,13 +191,7 @@ function handle(ws, meta, msg) {
           xPub,
           prekeyPub: prekeyPub || null,
           pqPrekeyPub: pqPrekeyPub || null,
-          // One-Time-Prekeys fuer volles X3DH (siehe 'publish-otpks' und
-          // 'lookup' unten): id -> oeffentlicher Schluessel. Jeder Eintrag
-          // wird bei einem forHandshake-Lookup genau EINMAL herausgegeben
-          // und danach sofort aus dieser Map entfernt.
           otpks: new Map(),
-          // Erstes Geraet ist automatisch vertrauenswuerdig,
-          // jedes weitere braucht manuelle Bestaetigung (Intrusion-Schutz).
           trusted: isFirstDevice,
           createdAt: now(),
           lastSeen: now(),
@@ -263,11 +201,10 @@ function handle(ws, meta, msg) {
           console.log(`[GUARD] Neues Geraet fuer ${userId}: ${deviceName} (wartet auf Bestaetigung)`);
         }
       } else if (existing.edPub !== edPub) {
-        // Geraete-ID mit anderem Schluessel -> moeglicher Angriff
         securityEvent(userId, 'key-mismatch', { deviceId });
         return send(ws, { type: 'error', error: 'key-mismatch' });
       } else {
-        if (prekeyPub) existing.prekeyPub = prekeyPub; // Prekey kann rotieren, Identity bleibt gleich
+        if (prekeyPub) existing.prekeyPub = prekeyPub;
         if (pqPrekeyPub) existing.pqPrekeyPub = pqPrekeyPub;
       }
 
@@ -278,7 +215,6 @@ function handle(ws, meta, msg) {
       break;
     }
 
-    // -- Schritt 2: Client beweist Schluesselbesitz per Signatur --
     case 'proof': {
       if (!meta.userId || !meta.nonce) return send(ws, { type: 'error', error: 'no-challenge' });
       const g = guard(meta.userId);
@@ -301,7 +237,6 @@ function handle(ws, meta, msg) {
       dev.lastSeen = now();
       send(ws, { type: 'authed', trusted: dev.trusted, deviceId: meta.deviceId });
 
-      // Offline-Queue zustellen (nur Chiffretext)
       if (dev.trusted && u.queue.length) {
         for (const env of u.queue) send(ws, env);
         u.queue = [];
@@ -309,16 +244,12 @@ function handle(ws, meta, msg) {
       break;
     }
 
-    // -- Client meldet einen fehlgeschlagenen LOKALEN Entsperrversuch --
-    // (Vault-Passphrase falsch). Der Server kennt die Passphrase nicht,
-    // zaehlt aber Fehlversuche kontouebergreifend fuer den Lockout.
     case 'report-unlock-fail': {
       if (!meta.userId) return;
       recordAuthFail(meta.userId, msg.device || 'lokal');
       break;
     }
 
-    // -- E2E-verschluesselte Nachricht routen (Server sieht nur Chiffretext) --
     case 'send': {
       if (!meta.authed) return send(ws, { type: 'error', error: 'not-authed' });
       if (!checkRate(sendRateByAccount, meta.userId, SEND_RATE_LIMIT, SEND_RATE_WINDOW_MS)) {
@@ -328,19 +259,6 @@ function handle(ws, meta, msg) {
       if (!to || !envelope || typeof envelope.ct !== 'string') {
         return send(ws, { type: 'error', error: 'bad-envelope' });
       }
-      // "Sealed Sender" fuer Folgenachrichten einer bereits bestehenden
-      // Sitzung: traegt das Envelope ein Sealed-Sender-Tag (client/src/
-      // net/realchat.ts: deriveSessionTag) UND ist es KEIN Erstkontakt
-      // (kein x3dh-Feld), wird die Konto-ID des Absenders NICHT in die
-      // zugestellte/zwischengespeicherte Nachricht geschrieben — der
-      // Empfaenger loest sie stattdessen selbst ueber das Tag auf. Bei
-      // Erstkontakt-Nachrichten (x3dh gesetzt) kennt die Gegenseite das Tag
-      // noch nicht und braucht die Konto-ID zwingend, um ueberhaupt antworten
-      // zu koennen. Der Relay selbst kennt den Absender an dieser Stelle
-      // dennoch immer ueber die authentifizierte Verbindung (meta.userId) —
-      // dieses Feld reduziert also, was in der zugestellten/gespeicherten
-      // Nachricht landet, nicht die Sicht des Betreibers auf die live
-      // eingehende Verbindung selbst (siehe SECURITY.md Punkt 7).
       const sealed = !!envelope.tag && !envelope.x3dh;
       const out = { type: 'deliver', from: sealed ? null : meta.userId, envelope, ts: now() };
       const target = users.get(to);
@@ -350,7 +268,6 @@ function handle(ws, meta, msg) {
       } else if (target) {
         if (target.queue.length < MAX_QUEUE) target.queue.push(out);
       } else {
-        // Unbekannter Empfaenger: Queue anlegen (Konto ggf. spaeter registriert)
         const t = getUser(to);
         if (t.queue.length < MAX_QUEUE) t.queue.push(out);
       }
@@ -358,7 +275,6 @@ function handle(ws, meta, msg) {
       break;
     }
 
-    // -- Geraeteverwaltung --
     case 'devices': {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
@@ -395,7 +311,6 @@ function handle(ws, meta, msg) {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
       if (u.devices.delete(msg.deviceId)) {
-        // Aktive Sockets dieses Geraets sofort trennen
         for (const [sock, m] of sockets) {
           if (m.userId === meta.userId && m.deviceId === msg.deviceId) {
             send(sock, { type: 'revoked' });
@@ -407,18 +322,10 @@ function handle(ws, meta, msg) {
       break;
     }
 
-    // -- Oeffentliche Schluessel eines Kontakts abfragen (fuer Schluesselaustausch) --
     case 'lookup': {
       if (!meta.authed) return;
       const target = users.get(msg.userId);
       const first = target ? [...target.devices.values()][0] : null;
-      // Ein One-Time-Prekey wird NUR verbraucht, wenn der Anfragende explizit
-      // signalisiert, direkt im Anschluss einen Handshake zu beginnen — ein
-      // reiner Info-Lookup (z. B. Kontaktname auffrischen) soll keinen
-      // wertvollen Einmal-Prekey aus dem Bestand der Gegenseite verbrauchen.
-      // Zusaetzlich eigens rate-limitiert (OTPK_LOOKUP_RATE_LIMIT), damit ein
-      // boeswilliger Akteur nicht durch schnell wiederholte Handshake-Lookups
-      // gezielt den gesamten OTPK-Bestand eines Opfers leerraeumt.
       let otpk = null;
       if (first && msg.forHandshake === true && first.otpks.size > 0) {
         if (!checkRate(otpkLookupRate, meta.userId, OTPK_LOOKUP_RATE_LIMIT, OTPK_LOOKUP_RATE_WINDOW_MS)) {
@@ -426,7 +333,7 @@ function handle(ws, meta, msg) {
         }
         const [id] = first.otpks.keys();
         const pub = first.otpks.get(id);
-        first.otpks.delete(id); // ab hier fuer IMMER vergeben, kein zweites Mal ausgegeben
+        first.otpks.delete(id);
         otpk = { id, pub };
       }
       send(ws, {
@@ -443,7 +350,6 @@ function handle(ws, meta, msg) {
       break;
     }
 
-    // -- Client hinterlegt (weitere) eigene One-Time-Prekeys fuer volles X3DH --
     case 'publish-otpks': {
       if (!meta.authed) return;
       const u = getUser(meta.userId);

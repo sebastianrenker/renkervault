@@ -1,5 +1,3 @@
-/** Untere Leiste: Theme-Presets + Akzentfarben (wie im Referenz-Dashboard,
- *  aber mit eigener Palette) + Dev-Bereich zum Simulieren von Angriffen. */
 import { ACCENTS, Settings, THEMES, ThemeName } from '../state/types';
 
 export function ThemeBar(props: {

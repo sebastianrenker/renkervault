@@ -1,6 +1,3 @@
-/** Alarm-Overlay: rotes Pulsieren + Banner über der gesamten UI.
- *  Rot existiert in RenkerVault NUR hier — Normalbetrieb ist rotfrei,
- *  damit Rot sofort als "etwas stimmt nicht" gelesen wird. */
 import { AlarmState } from '../state/types';
 
 export function AlarmOverlay(props: {

@@ -1,13 +1,3 @@
-/**
- * Demo-Welt mit simulierten Gesprächspartnern.
- * ============================================
- * WICHTIG: Das ist KEINE Fake-Krypto-Anzeige. Jede Demo-Nachricht läuft
- * wirklich durch die Double-Ratchet- bzw. Epoch-Key-Verschlüsselung:
- * die "Peers" leben im selben Browser-Prozess, besitzen echte Schlüssel-
- * paare und ent-/verschlüsseln real. Der angezeigte Chiffretext ist der
- * tatsächliche AES-GCM-Output. Für den Betrieb über den Relay-Server
- * werden dieselben Envelopes über WebSocket geschickt (net/client.ts).
- */
 import { newX25519, b64, utf8, aesGcmEncrypt, KeyPair } from '../crypto/primitives';
 import { newPqKeyPair } from '../crypto/pq';
 import {
@@ -20,17 +10,16 @@ interface PeerSim {
   id: string;
   name: string;
   identity: KeyPair;
-  ratchet: Ratchet;      // Ratchet-Ende des Peers
+  ratchet: Ratchet;
   replies: string[];
   replyIdx: number;
 }
 
 interface SymState { key: Uint8Array; epoch: number; }
 
-// Sitzungs-Zustand (nur RAM; Sitzungen werden pro App-Start frisch ausgehandelt)
 const peers = new Map<string, PeerSim>();
 const myRatchets = new Map<string, Ratchet>();
-const symKeys = new Map<string, SymState>(); // Gruppen-/Kanal-Epoch-Keys
+const symKeys = new Map<string, SymState>();
 
 const REPLY_POOLS: Record<string, string[]> = {
   nadja: [
@@ -53,25 +42,17 @@ const REPLY_POOLS: Record<string, string[]> = {
   ],
 };
 
-/** Direkten Demo-Kontakt anlegen: echter Handshake + zwei Ratchet-Enden. */
 async function makePeer(id: string, name: string, myIdentity: KeyPair, stored?: KeyPair): Promise<PeerSim> {
   const peerIdentity = stored ?? newX25519();
   const peerRatchetBase = newX25519();
-  const peerPq = newPqKeyPair(); // Demo-Peer als Responder: ML-KEM-Prekey (nicht persistiert)
+  const peerPq = newPqKeyPair();
 
-  // X3DH-lite (hybrid, siehe crypto/ratchet.ts): Ich (Initiator) <-> Peer
-  // (Responder). peerRatchetBase dient zugleich als Peers veröffentlichter
-  // X25519-Prekey, peerPq.publicKey als sein ML-KEM-768-Prekey.
   const { sk, ephPub, pqCipherText } = handshakeInitiator(myIdentity, peerIdentity.pub, peerRatchetBase.pub, peerPq.publicKey);
   const skPeer = handshakeResponder(peerIdentity, peerRatchetBase, myIdentity.pub, ephPub, peerPq.secretKey, pqCipherText);
 
   const mine = Ratchet.initAlice(sk, peerRatchetBase.pub);
   const theirs = Ratchet.initBob(skPeer, peerRatchetBase);
 
-  // Session-Priming: Der Responder kann im Double Ratchet erst senden,
-  // nachdem er die erste Initiator-Nachricht empfangen hat (DH-Ratchet-
-  // Schritt initialisiert seine Sendekette). Daher läuft direkt nach dem
-  // Handshake eine stille Bestätigungsnachricht durch die Sitzung.
   await theirs.decrypt(await mine.encrypt(utf8.enc('session-init')));
 
   const sim: PeerSim = {
@@ -85,7 +66,6 @@ async function makePeer(id: string, name: string, myIdentity: KeyPair, stored?: 
 
 const minsAgo = (m: number) => Date.now() - m * 60_000;
 
-/** 1:1-Nachricht durch beide echten Ratchet-Enden schicken. */
 async function directMsg(
   peerId: string, own: boolean, text: string, ts: number, myName: string, myId: string
 ): Promise<Message> {
@@ -94,14 +74,13 @@ async function directMsg(
   const sender = own ? mine : peer.ratchet;
   const receiver = own ? peer.ratchet : mine;
   const enc = await sender.encrypt(utf8.enc(text));
-  const dec = utf8.dec(await receiver.decrypt(enc)); // echte Entschlüsselung
+  const dec = utf8.dec(await receiver.decrypt(enc));
   return {
     id: uid('m'), from: own ? myId : peerId, fromName: own ? myName : peer.name,
     body: dec, ct: enc.ct, ts, own, kind: 'text',
   };
 }
 
-/** Gruppen-/Kanalnachricht mit Epoch-Key verschlüsseln. */
 async function symMsg(
   chatId: string, fromId: string, fromName: string, own: boolean, text: string, ts: number
 ): Promise<Message> {
@@ -117,9 +96,6 @@ function sysMsg(text: string, ts: number): Message {
   return { id: uid('s'), from: 'system', fromName: 'System', body: text, ct: '', ts, own: false, kind: 'system' };
 }
 
-// ---------------------------------------------------------------------------
-// Öffentliche Demo-API
-// ---------------------------------------------------------------------------
 export interface DemoPeerKey { priv: string; pub: string; name: string; }
 
 export async function buildDemoWorld(identity: Identity): Promise<{
@@ -138,7 +114,6 @@ export async function buildDemoWorld(identity: Identity): Promise<{
   const chats: Chat[] = [];
   const messages: Record<string, Message[]> = {};
 
-  // --- 3 Einzelchats -------------------------------------------------------
   const directDefs: { peer: PeerSim; sub: string; script: [boolean, string, number][] }[] = [
     {
       peer: nadja, sub: 'zuletzt aktiv vor 4 min',
@@ -181,7 +156,7 @@ export async function buildDemoWorld(identity: Identity): Promise<{
       ],
       safetyNumber: sn,
       shortFp: shortFingerprint(b64.dec(b64.enc(p.identity.pub))),
-      verified: p.id === 'nadja', // eine verifizierte Demo-Beziehung
+      verified: p.id === 'nadja',
       disappearSec: p.id === 'brandt' ? 86_400 : 0,
       epoch: 1, keyRotatedAt: minsAgo(60), unread: p.id === 'nadja' ? 1 : 0,
     });
@@ -192,7 +167,6 @@ export async function buildDemoWorld(identity: Identity): Promise<{
     messages[chatId] = hist;
   }
 
-  // --- 1 Gruppenchat -------------------------------------------------------
   const gid = 'grp-werkstatt';
   symKeys.set(gid, { key: newGroupEpochKey(), epoch: 3 });
   const gFp = groupFingerprint(symKeys.get(gid)!.key, 3);
@@ -217,7 +191,6 @@ export async function buildDemoWorld(identity: Identity): Promise<{
     await symMsg(gid, 'brandt', 'Dr. A. Brandt', false, 'Rotation bei mir angekommen. Alles grün.', minsAgo(70)),
   ];
 
-  // --- 1 Kanal -------------------------------------------------------------
   const cid = 'ch-bulletin';
   symKeys.set(cid, { key: newGroupEpochKey(), epoch: 1 });
   const cFp = groupFingerprint(symKeys.get(cid)!.key, 1);
@@ -253,12 +226,6 @@ export async function buildDemoWorld(identity: Identity): Promise<{
   return { chats, messages, secLog, peerKeys };
 }
 
-/**
- * Sitzungen nach App-Neustart wiederherstellen: Peer-IDENTITÄTEN bleiben
- * stabil (Safety Numbers ändern sich nicht), aber Ratchet-Sitzungen und
- * Gruppen-Epoch-Keys werden frisch ausgehandelt (Prototyp: Sitzungszustand
- * wird bewusst nicht persistiert). Gruppen/Kanäle bekommen eine neue Epoche.
- */
 export async function restoreDemoSessions(
   identity: Identity,
   peerKeys: Record<string, DemoPeerKey>,
@@ -279,17 +246,15 @@ export async function restoreDemoSessions(
   return out;
 }
 
-/** Eigene 1:1-Nachricht real verschlüsseln (Peer entschlüsselt zur Kontrolle). */
 export async function demoSendDirect(peerId: string, text: string): Promise<{ ct: string }> {
   const mine = myRatchets.get(peerId);
   const peer = peers.get(peerId);
   if (!mine || !peer) throw new Error('Unbekannter Kontakt');
   const enc = await mine.encrypt(utf8.enc(text));
-  await peer.ratchet.decrypt(enc); // Roundtrip-Nachweis
+  await peer.ratchet.decrypt(enc);
   return { ct: enc.ct };
 }
 
-/** Simulierte Antwort des Peers (echte Ratchet-Verschlüsselung in Gegenrichtung). */
 export async function demoPeerReply(peerId: string): Promise<{ text: string; ct: string } | null> {
   const mine = myRatchets.get(peerId);
   const peer = peers.get(peerId);
@@ -305,7 +270,6 @@ export function demoPeerName(peerId: string): string {
   return peers.get(peerId)?.name ?? peerId;
 }
 
-/** Gruppen-/Kanalnachricht mit aktuellem Epoch-Key verschlüsseln. */
 export async function demoSendSym(chatId: string, text: string): Promise<{ ct: string }> {
   const st = symKeys.get(chatId);
   if (!st) throw new Error('Unbekannte Gruppe / unbekannter Kanal');
@@ -313,7 +277,6 @@ export async function demoSendSym(chatId: string, text: string): Promise<{ ct: s
   return { ct: b64.enc(ct) };
 }
 
-/** Rekeying: neue Epoche (z. B. nach Mitgliederänderung oder manuell). */
 export function demoRotateEpoch(chatId: string): { epoch: number; fp: string } {
   const st = symKeys.get(chatId);
   if (!st) throw new Error('Unbekannte Gruppe / unbekannter Kanal');
@@ -322,7 +285,6 @@ export function demoRotateEpoch(chatId: string): { epoch: number; fp: string } {
   return { epoch: st.epoch, fp: groupFingerprint(st.key, st.epoch) };
 }
 
-/** Datei-Anhang verschlüsseln (1:1 über Ratchet, Gruppe/Kanal über Epoch-Key). */
 export async function demoEncryptFile(
   chatId: string, kind: 'direct' | 'sym', bytes: Uint8Array
 ): Promise<{ ct: string }> {
