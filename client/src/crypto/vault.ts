@@ -1,3 +1,4 @@
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
   rand, b64, utf8, deriveKey, constEq,
   aesGcmEncrypt, aesGcmDecrypt, hkdfSha256, hmacSha256,
@@ -10,6 +11,7 @@ interface VaultFile {
   createdAt: number;
   kdfSalt: string;
   wrap: string;
+  dpapiWrapped?: boolean;
   duress: { salt: string; hash: string } | null;
   data: string;
   mac: string;
@@ -18,7 +20,22 @@ interface VaultFile {
 export type UnlockResult<T> =
   | { ok: true; duress: false; data: T }
   | { ok: true; duress: true }
-  | { ok: false; reason: 'wrong-pass' | 'tampered' | 'missing' };
+  | { ok: false; reason: 'wrong-pass' | 'tampered' | 'missing' | 'device-mismatch' };
+
+async function dpapiAvailable(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try { return await invoke<boolean>('dpapi_available'); } catch { return false; }
+}
+
+async function dpapiWrap(bytes: Uint8Array): Promise<Uint8Array> {
+  const out = await invoke<number[]>('dpapi_protect', { data: Array.from(bytes) });
+  return new Uint8Array(out);
+}
+
+async function dpapiUnwrap(bytes: Uint8Array): Promise<Uint8Array> {
+  const out = await invoke<number[]>('dpapi_unprotect', { data: Array.from(bytes) });
+  return new Uint8Array(out);
+}
 
 let masterKey: Uint8Array | null = null;
 
@@ -43,7 +60,10 @@ export async function createVault<T>(
   const kdfSalt = rand(16);
   const kek = await deriveKey(passphrase, kdfSalt);
   const mk = rand(32);
-  const wrap = await aesGcmEncrypt(kek, mk);
+  let wrap = await aesGcmEncrypt(kek, mk);
+
+  const dpapiOn = await dpapiAvailable();
+  if (dpapiOn) wrap = await dpapiWrap(wrap);
 
   let duress: VaultFile['duress'] = null;
   if (duressPin) {
@@ -55,7 +75,7 @@ export async function createVault<T>(
   const { data: ct, mac } = await sealData(data);
   const file: VaultFile = {
     v: 1, createdAt: Date.now(),
-    kdfSalt: b64.enc(kdfSalt), wrap: b64.enc(wrap),
+    kdfSalt: b64.enc(kdfSalt), wrap: b64.enc(wrap), dpapiWrapped: dpapiOn,
     duress, data: ct, mac,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(file));
@@ -91,9 +111,18 @@ export async function unlockVault<T>(passphrase: string): Promise<UnlockResult<T
     return { ok: true, duress: true };
   }
 
+  let wrapBytes = b64.dec(file.wrap);
+  if (file.dpapiWrapped) {
+    try {
+      wrapBytes = await dpapiUnwrap(wrapBytes);
+    } catch {
+      return { ok: false, reason: 'device-mismatch' };
+    }
+  }
+
   let mk: Uint8Array;
   try {
-    mk = await aesGcmDecrypt(kek, b64.dec(file.wrap));
+    mk = await aesGcmDecrypt(kek, wrapBytes);
   } catch {
     return { ok: false, reason: 'wrong-pass' };
   }

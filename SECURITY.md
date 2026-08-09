@@ -134,11 +134,32 @@ Empfänger löst trotzdem korrekt auf).
    Rust-SQLite/SQLCipher-Bindings + Tauri-IPC-Kommandos + einen Migrationspfad
    für bestehende `localStorage`-Tresore, und ließe sich nur an einem
    tatsächlich gestarteten Tauri-Prozess korrekt verifizieren — nicht ohne
-   diesen Test zu verantworten. Ebenso offen (Härtungs-Roadmap Punkt 6):
-   ein zusätzlicher, hardwaregebundener Wrap-Layer (Windows TPM/DPAPI,
-   Android Keystore), der eine kopierte Tresordatei auf fremder Hardware
-   unbrauchbar machen würde — aus demselben Grund (nur auf echter Hardware
-   verifizierbar) nicht blind umgesetzt.
+   diesen Test zu verantworten.
+   ~~Hardware-gebundener Wrap-Layer (Härtungs-Roadmap Punkt 6)~~ — für
+   Windows-Desktop seit diesem Update teilweise umgesetzt: `src-tauri/src/dpapi.rs`
+   kapselt `CryptProtectData`/`CryptUnprotectData` (Windows-DPAPI, an
+   Windows-Benutzerkonto + Gerät gebunden) als Tauri-Kommandos. `crypto/vault.ts`
+   erkennt zur Laufzeit per `isTauri()`, ob eine native Desktop-Umgebung
+   läuft, und legt dann den bereits KEK-gewrappten Master-Key zusätzlich in
+   einer DPAPI-Schicht ab (`dpapiWrapped: true` im Vault-File) — eine
+   kopierte Tresordatei ist auf einem anderen Gerät/Windows-Konto dann
+   selbst mit korrekter Passphrase nicht mehr entschlüsselbar (neuer
+   `UnlockResult`-Grund `device-mismatch`, bewusst NICHT als Fehlversuch in
+   den Brute-Force-Zähler gezählt, da es kein Passphrasen-Problem ist). Im
+   Browser-/Android-Build bleibt das Verhalten unverändert (kein DPAPI
+   verfügbar, `dpapiWrapped: false`, reiner Argon2id-Pfad wie bisher) —
+   vollständig rückwärtskompatibel zu bestehenden Tresoren.
+   **Testabdeckung:** Die native DPAPI-Ebene selbst ist über vier echte
+   `cargo test`-Fälle gegen die tatsächliche Windows-API verifiziert
+   (Rundlauf, kein Klartext im geschützten Blob, Fehlschlag bei
+   Manipulation, Leer-Eingabe). Der Browser-Fallback-Pfad (kein Tauri) ist
+   per echtem End-to-End-Test verifiziert (Erstellen → Sperren →
+   Entsperren). **Nicht verifizierbar in dieser Umgebung:** der vollständige
+   Rundlauf *innerhalb* eines laufenden Tauri-Fensters (natives WebView2-
+   Fenster, von den hier verfügbaren Browser-Automatisierungswerkzeugen
+   nicht ansteuerbar) — vor Produktiveinsatz manuell auf echtem Windows mit
+   `npm run tauri dev` nachzuholen. macOS (Keychain) und Android
+   (Keystore) sind analog denkbar, aber nicht umgesetzt.
 6. **Relay hält Zustand nur im RAM** (Prototyp): Konten/Queues gehen bei
    Neustart verloren. Produktion: PostgreSQL für Metadaten, persistente
    verschlüsselte Offline-Queues.

@@ -93,6 +93,7 @@ export default function App() {
 
   const [fails, setFails] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
+  const [deviceMismatch, setDeviceMismatch] = useState(false);
   const pendingEvents = useRef<SecEvent[]>([]);
 
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('offline');
@@ -692,6 +693,7 @@ export default function App() {
   const handleUnlock = async (passphrase: string) => {
     if (lockedUntil > Date.now()) return;
     setBusy(true);
+    setDeviceMismatch(false);
     try {
       const res = await unlockVault<VaultData>(passphrase);
       if (res.ok && res.duress) {
@@ -744,6 +746,11 @@ export default function App() {
       }
       if (res.reason === 'tampered') {
         triggerAlarm('TAMPER', 'Integritätsprüfung fehlgeschlagen — lokale Datenbank wurde manipuliert', { lockdown: true });
+        return;
+      }
+      if (res.reason === 'device-mismatch') {
+        setDeviceMismatch(true);
+        pendingEvents.current.push(ev('warn', 'DEVICE_MISMATCH', 'Tresor ist an dieses Gerät/Windows-Konto gebunden (DPAPI) — auf einem anderen Gerät nicht entsperrbar, auch mit korrekter Passphrase.'));
         return;
       }
       const n = fails + 1;
@@ -1364,6 +1371,7 @@ export default function App() {
         <UnlockVault
           onUnlock={handleUnlock} busy={busy} fails={fails}
           lockedUntil={lockedUntil} alarm={alarm.active} onReset={destroyAll}
+          deviceMismatch={deviceMismatch}
         />
         <AlarmOverlay alarm={alarm} onAck={ackAlarm} onLock={() => setAlarm(NO_ALARM)} />
       </>

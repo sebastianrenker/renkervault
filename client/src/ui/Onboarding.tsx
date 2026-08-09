@@ -64,6 +64,7 @@ export function UnlockVault(props: {
   lockedUntil: number;
   alarm: boolean;
   onReset: () => void;
+  deviceMismatch?: boolean;
 }) {
   const [pass, setPass] = useState('');
   const locked = props.lockedUntil > Date.now();
@@ -83,7 +84,14 @@ export function UnlockVault(props: {
           onChange={(e) => setPass(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && pass) { props.onUnlock(pass); setPass(''); } }}
         />
-        {props.fails > 0 && !locked && (
+        {props.deviceMismatch && (
+          <div className="gate-err">
+            🔒 Dieser Tresor ist an ein anderes Gerät/Windows-Konto gebunden
+            (Hardware-Bindung aktiv) — die Passphrase kann hier korrekt sein
+            und trotzdem nicht reichen.
+          </div>
+        )}
+        {props.fails > 0 && !locked && !props.deviceMismatch && (
           <div className="gate-err">✖ Falsche Passphrase ({props.fails}/5 Fehlversuche)</div>
         )}
         {locked && (
