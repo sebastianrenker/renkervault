@@ -1,0 +1,378 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import crypto from 'node:crypto';
+import { WebSocketServer } from 'ws';
+import { ed25519 } from '@noble/curves/ed25519';
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
+const HOST = process.env.HOST || '0.0.0.0';
+const TLS_CERT_FILE = process.env.TLS_CERT_FILE || '';
+const TLS_KEY_FILE = process.env.TLS_KEY_FILE || '';
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+
+const users = new Map();
+const authGuard = new Map();
+const sockets = new Map();
+const connsByIp = new Map();
+const sendRateByAccount = new Map();
+const otpkLookupRate = new Map();
+
+const FAIL_WINDOW_MS = 5 * 60 * 1000;
+const FAIL_LIMIT = 5;
+const LOCKOUT_MS = 60 * 1000;
+const MAX_QUEUE = 500;
+const MAX_MSG_BYTES = 2 * 1024 * 1024;
+const MAX_CONNS_PER_IP = 20;
+const AUTH_TIMEOUT_MS = 15 * 1000;
+const MAX_OTPK_PER_DEVICE = 100;
+const MAX_OTPK_PER_PUBLISH = 50;
+const SEND_RATE_WINDOW_MS = 60 * 1000;
+const SEND_RATE_LIMIT = 300;
+const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
+const OTPK_LOOKUP_RATE_LIMIT = 20;
+
+const b64 = {
+  dec: (s) => Uint8Array.from(Buffer.from(s, 'base64')),
+};
+
+function now() { return Date.now(); }
+
+function checkRate(map, key, limit, windowMs) {
+  const t = now();
+  let hits = map.get(key);
+  if (!hits) { hits = []; map.set(key, hits); }
+  while (hits.length && t - hits[0] > windowMs) hits.shift();
+  if (hits.length >= limit) return false;
+  hits.push(t);
+  return true;
+}
+
+function getUser(userId) {
+  let u = users.get(userId);
+  if (!u) {
+    u = { devices: new Map(), queue: [] };
+    users.set(userId, u);
+  }
+  return u;
+}
+
+function guard(userId) {
+  let g = authGuard.get(userId);
+  if (!g) { g = { fails: [], lockedUntil: 0 }; authGuard.set(userId, g); }
+  return g;
+}
+
+function toUser(userId, msg, exceptWs = null) {
+  const data = JSON.stringify(msg);
+  for (const [ws, meta] of sockets) {
+    if (meta.authed && meta.userId === userId && ws !== exceptWs && ws.readyState === 1) {
+      ws.send(data);
+    }
+  }
+}
+
+function send(ws, msg) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
+function securityEvent(userId, kind, detail) {
+  toUser(userId, { type: 'security-event', kind, detail, ts: now() });
+}
+
+function recordAuthFail(userId, deviceHint) {
+  const g = guard(userId);
+  const t = now();
+  g.fails = g.fails.filter((f) => t - f < FAIL_WINDOW_MS);
+  g.fails.push(t);
+  securityEvent(userId, 'auth-fail', {
+    attempts: g.fails.length,
+    device: deviceHint || 'unbekannt',
+  });
+  if (g.fails.length >= FAIL_LIMIT) {
+    g.lockedUntil = t + LOCKOUT_MS;
+    g.fails = [];
+    securityEvent(userId, 'lockout', { until: g.lockedUntil, seconds: LOCKOUT_MS / 1000 });
+    console.log(`[GUARD] Lockout fuer ${userId} (${FAIL_LIMIT} Fehlversuche)`);
+    return true;
+  }
+  return false;
+}
+
+const useTls = !!(TLS_CERT_FILE && TLS_KEY_FILE);
+
+function requestHandler(req, res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ service: 'renkervault-relay', plaintextAccess: false }));
+}
+
+const server = useTls
+  ? https.createServer({ cert: fs.readFileSync(TLS_CERT_FILE), key: fs.readFileSync(TLS_KEY_FILE) }, requestHandler)
+  : http.createServer(requestHandler);
+
+const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_BYTES });
+
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const fwd = req.headers['x-forwarded-for'];
+    if (fwd) return String(fwd).split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  const count = (connsByIp.get(ip) || 0) + 1;
+  connsByIp.set(ip, count);
+  if (count > MAX_CONNS_PER_IP) {
+    send(ws, { type: 'error', error: 'too-many-connections' });
+    ws.close();
+    return;
+  }
+
+  const meta = { userId: null, deviceId: null, authed: false, nonce: null, msgTimes: [], ip };
+  sockets.set(ws, meta);
+
+  const authTimer = setTimeout(() => {
+    if (!meta.authed) ws.close();
+  }, AUTH_TIMEOUT_MS);
+
+  ws.on('message', (raw) => {
+    const t = now();
+    meta.msgTimes = meta.msgTimes.filter((x) => t - x < 1000);
+    meta.msgTimes.push(t);
+    if (meta.msgTimes.length > 30) { send(ws, { type: 'error', error: 'rate-limited' }); return; }
+
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+    try {
+      handle(ws, meta, msg);
+    } catch (err) {
+      console.error('[ERR]', err.message);
+      send(ws, { type: 'error', error: 'internal' });
+    }
+  });
+
+  ws.on('close', () => {
+    clearTimeout(authTimer);
+    const n = (connsByIp.get(ip) || 1) - 1;
+    if (n <= 0) connsByIp.delete(ip); else connsByIp.set(ip, n);
+    if (meta.authed) {
+      const u = users.get(meta.userId);
+      const d = u?.devices.get(meta.deviceId);
+      if (d) d.lastSeen = now();
+    }
+    sockets.delete(ws);
+  });
+});
+
+function handle(ws, meta, msg) {
+  switch (msg.type) {
+    case 'hello': {
+      const { userId, deviceId, deviceName, edPub, xPub, prekeyPub, pqPrekeyPub } = msg;
+      if (!userId || !deviceId || !edPub || !xPub) return send(ws, { type: 'error', error: 'bad-hello' });
+
+      const g = guard(userId);
+      if (g.lockedUntil > now()) {
+        return send(ws, { type: 'locked', until: g.lockedUntil });
+      }
+
+      const u = getUser(userId);
+      const existing = u.devices.get(deviceId);
+      const isFirstDevice = u.devices.size === 0;
+
+      if (!existing) {
+        u.devices.set(deviceId, {
+          deviceId,
+          name: deviceName || 'Unbenanntes Geraet',
+          edPub,
+          xPub,
+          prekeyPub: prekeyPub || null,
+          pqPrekeyPub: pqPrekeyPub || null,
+          otpks: new Map(),
+          trusted: isFirstDevice,
+          createdAt: now(),
+          lastSeen: now(),
+        });
+        if (!isFirstDevice) {
+          securityEvent(userId, 'new-device', { deviceId, name: deviceName || 'Unbenanntes Geraet' });
+          console.log(`[GUARD] Neues Geraet fuer ${userId}: ${deviceName} (wartet auf Bestaetigung)`);
+        }
+      } else if (existing.edPub !== edPub) {
+        securityEvent(userId, 'key-mismatch', { deviceId });
+        return send(ws, { type: 'error', error: 'key-mismatch' });
+      } else {
+        if (prekeyPub) existing.prekeyPub = prekeyPub;
+        if (pqPrekeyPub) existing.pqPrekeyPub = pqPrekeyPub;
+      }
+
+      meta.userId = userId;
+      meta.deviceId = deviceId;
+      meta.nonce = crypto.randomBytes(32).toString('base64');
+      send(ws, { type: 'challenge', nonce: meta.nonce });
+      break;
+    }
+
+    case 'proof': {
+      if (!meta.userId || !meta.nonce) return send(ws, { type: 'error', error: 'no-challenge' });
+      const g = guard(meta.userId);
+      if (g.lockedUntil > now()) return send(ws, { type: 'locked', until: g.lockedUntil });
+
+      const u = getUser(meta.userId);
+      const dev = u.devices.get(meta.deviceId);
+      let ok = false;
+      try {
+        ok = ed25519.verify(b64.dec(msg.sig), b64.dec(meta.nonce), b64.dec(dev.edPub));
+      } catch { ok = false; }
+
+      if (!ok) {
+        recordAuthFail(meta.userId, dev?.name);
+        return send(ws, { type: 'auth-failed' });
+      }
+
+      meta.authed = true;
+      meta.nonce = null;
+      dev.lastSeen = now();
+      send(ws, { type: 'authed', trusted: dev.trusted, deviceId: meta.deviceId });
+
+      if (dev.trusted && u.queue.length) {
+        for (const env of u.queue) send(ws, env);
+        u.queue = [];
+      }
+      break;
+    }
+
+    case 'report-unlock-fail': {
+      if (!meta.userId) return;
+      recordAuthFail(meta.userId, msg.device || 'lokal');
+      break;
+    }
+
+    case 'send': {
+      if (!meta.authed) return send(ws, { type: 'error', error: 'not-authed' });
+      if (!checkRate(sendRateByAccount, meta.userId, SEND_RATE_LIMIT, SEND_RATE_WINDOW_MS)) {
+        return send(ws, { type: 'error', error: 'account-rate-limited' });
+      }
+      const { to, envelope } = msg;
+      if (!to || !envelope || typeof envelope.ct !== 'string') {
+        return send(ws, { type: 'error', error: 'bad-envelope' });
+      }
+      const sealed = !!envelope.tag && !envelope.x3dh;
+      const out = { type: 'deliver', from: sealed ? null : meta.userId, envelope, ts: now() };
+      const target = users.get(to);
+      const online = [...sockets.values()].some((m) => m.authed && m.userId === to);
+      if (online) {
+        toUser(to, out);
+      } else if (target) {
+        if (target.queue.length < MAX_QUEUE) target.queue.push(out);
+      } else {
+        const t = getUser(to);
+        if (t.queue.length < MAX_QUEUE) t.queue.push(out);
+      }
+      send(ws, { type: 'sent', ref: msg.ref ?? null });
+      break;
+    }
+
+    case 'devices': {
+      if (!meta.authed) return;
+      const u = getUser(meta.userId);
+      const onlineIds = new Set(
+        [...sockets.values()].filter((m) => m.authed && m.userId === meta.userId).map((m) => m.deviceId)
+      );
+      send(ws, {
+        type: 'devices',
+        devices: [...u.devices.values()].map((d) => ({
+          deviceId: d.deviceId,
+          name: d.name,
+          trusted: d.trusted,
+          createdAt: d.createdAt,
+          lastSeen: d.lastSeen,
+          online: onlineIds.has(d.deviceId),
+          current: d.deviceId === meta.deviceId,
+        })),
+      });
+      break;
+    }
+
+    case 'approve-device': {
+      if (!meta.authed) return;
+      const u = getUser(meta.userId);
+      const d = u.devices.get(msg.deviceId);
+      if (d) {
+        d.trusted = true;
+        securityEvent(meta.userId, 'device-approved', { deviceId: d.deviceId, name: d.name });
+      }
+      break;
+    }
+
+    case 'revoke-device': {
+      if (!meta.authed) return;
+      const u = getUser(meta.userId);
+      if (u.devices.delete(msg.deviceId)) {
+        for (const [sock, m] of sockets) {
+          if (m.userId === meta.userId && m.deviceId === msg.deviceId) {
+            send(sock, { type: 'revoked' });
+            sock.close();
+          }
+        }
+        securityEvent(meta.userId, 'device-revoked', { deviceId: msg.deviceId });
+      }
+      break;
+    }
+
+    case 'lookup': {
+      if (!meta.authed) return;
+      const target = users.get(msg.userId);
+      const first = target ? [...target.devices.values()][0] : null;
+      let otpk = null;
+      if (first && msg.forHandshake === true && first.otpks.size > 0) {
+        if (!checkRate(otpkLookupRate, meta.userId, OTPK_LOOKUP_RATE_LIMIT, OTPK_LOOKUP_RATE_WINDOW_MS)) {
+          return send(ws, { type: 'error', error: 'lookup-rate-limited', ref: msg.ref ?? null });
+        }
+        const [id] = first.otpks.keys();
+        const pub = first.otpks.get(id);
+        first.otpks.delete(id);
+        otpk = { id, pub };
+      }
+      send(ws, {
+        type: 'lookup-result',
+        userId: msg.userId,
+        found: !!first,
+        edPub: first?.edPub ?? null,
+        xPub: first?.xPub ?? null,
+        prekeyPub: first?.prekeyPub ?? null,
+        pqPrekeyPub: first?.pqPrekeyPub ?? null,
+        otpk,
+        ref: msg.ref ?? null,
+      });
+      break;
+    }
+
+    case 'publish-otpks': {
+      if (!meta.authed) return;
+      const u = getUser(meta.userId);
+      const dev = u.devices.get(meta.deviceId);
+      if (!dev || !Array.isArray(msg.keys)) return;
+      const keys = msg.keys.slice(0, MAX_OTPK_PER_PUBLISH);
+      for (const k of keys) {
+        if (!k || typeof k.id !== 'string' || typeof k.pub !== 'string') continue;
+        if (dev.otpks.size >= MAX_OTPK_PER_DEVICE) break;
+        if (!dev.otpks.has(k.id)) dev.otpks.set(k.id, k.pub);
+      }
+      break;
+    }
+
+    default:
+      send(ws, { type: 'error', error: 'unknown-type' });
+  }
+}
+
+server.listen(PORT, HOST, () => {
+  const scheme = useTls ? 'wss' : 'ws';
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  console.log(`RenkerVault Relay laeuft auf ${scheme}://${displayHost}:${PORT} (gebunden an ${HOST})`);
+  console.log(`TLS: ${useTls ? 'AKTIV (natives Zertifikat)' : 'AUS — nur fuer lokale Nutzung/Reverse-Proxy-Setup geeignet, siehe deploy/DEPLOYMENT.md'}`);
+  console.log('Zero-Knowledge-Modus: Server speichert ausschliesslich Chiffretext.');
+});

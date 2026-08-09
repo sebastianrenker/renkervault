@@ -1,0 +1,15 @@
+{
+  "name": "renkervault-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RenkerVault Zero-Knowledge Relay - speichert und routet ausschliesslich Chiffretext",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
+    "ws": "8.21.0"
+  }
+}

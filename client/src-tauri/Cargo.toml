@@ -1,0 +1,26 @@
+[package]
+name = "renkervault"
+version = "0.1.0"
+description = "RenkerVault — Ende-zu-Ende-verschlüsselter Chat (Desktop-Shell)"
+authors = ["Renker Industries"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+serde_json = "=1.0.150"
+serde = { version = "=1.0.228", features = ["derive"] }
+log = "=0.4.33"
+tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-log = "=2.9.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.60.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
