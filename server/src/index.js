@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { ed25519 } from '@noble/curves/ed25519';
 
@@ -31,6 +32,15 @@ const SEND_RATE_WINDOW_MS = 60 * 1000;
 const SEND_RATE_LIMIT = 300;
 const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
 const OTPK_LOOKUP_RATE_LIMIT = 20;
+// Begrenzt, wie viele Konten (echte + durch "send" an unbekannte Empfaenger
+// automatisch angelegte Phantom-Konten) der Prozess insgesamt im Speicher haelt —
+// ohne diese Grenze koennte ein authentifizierter Absender durch Nachrichten an
+// beliebig viele erfundene userIds unbegrenzt Speicher belegen.
+const MAX_TRACKED_USERS = 200_000;
+// Nach dieser Zeit verfallen ungelieferte Nachrichten in der Offline-Warteschlange
+// und werden beim naechsten Sweep entfernt (bounded storage statt ewigem Anwachsen).
+const QUEUE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 const b64 = {
   dec: (s) => Uint8Array.from(Buffer.from(s, 'base64')),
@@ -51,10 +61,23 @@ function checkRate(map, key, limit, windowMs) {
 function getUser(userId) {
   let u = users.get(userId);
   if (!u) {
-    u = { devices: new Map(), queue: [] };
+    u = { devices: new Map(), queue: [], createdAt: now() };
     users.set(userId, u);
   }
   return u;
+}
+
+// Entfernt abgelaufene Warteschlangen-Eintraege und raeumt Konten auf, die nie ein
+// echtes Geraet registriert haben (z. B. durch "send" an erfundene Empfaenger
+// entstandene Phantom-Konten) und deren Warteschlange inzwischen leer ist.
+function sweep() {
+  const t = now();
+  for (const [userId, u] of users) {
+    if (u.queue.length) u.queue = u.queue.filter((e) => t - e.ts < QUEUE_TTL_MS);
+    if (u.devices.size === 0 && u.queue.length === 0 && t - (u.createdAt ?? 0) > QUEUE_TTL_MS) {
+      users.delete(userId);
+    }
+  }
 }
 
 function guard(userId) {
@@ -70,6 +93,27 @@ function toUser(userId, msg, exceptWs = null) {
       ws.send(data);
     }
   }
+}
+
+// Wie toUser(), aber liefert nur an Geraete, die der Kontoinhaber bereits als
+// vertrauenswuerdig bestaetigt hat. Ein neues, noch nicht bestaetigtes Geraet kann
+// sich sonst einfach online halten und live jede eingehende Nachricht mitlesen,
+// ohne dass die Bestaetigung durch ein anderes Geraet je durchgesetzt wird.
+function toTrustedUser(userId, msg, u) {
+  const data = JSON.stringify(msg);
+  for (const [ws, meta] of sockets) {
+    if (meta.authed && meta.userId === userId && ws.readyState === 1) {
+      const dev = u.devices.get(meta.deviceId);
+      if (dev && dev.trusted) ws.send(data);
+    }
+  }
+}
+
+function hasTrustedOnlineDevice(userId, u) {
+  for (const meta of sockets.values()) {
+    if (meta.authed && meta.userId === userId && u.devices.get(meta.deviceId)?.trusted) return true;
+  }
+  return false;
 }
 
 function send(ws, msg) {
@@ -262,12 +306,12 @@ function handle(ws, meta, msg) {
       const sealed = !!envelope.tag && !envelope.x3dh;
       const out = { type: 'deliver', from: sealed ? null : meta.userId, envelope, ts: now() };
       const target = users.get(to);
-      const online = [...sockets.values()].some((m) => m.authed && m.userId === to);
-      if (online) {
-        toUser(to, out);
+      if (target && hasTrustedOnlineDevice(to, target)) {
+        toTrustedUser(to, out, target);
       } else if (target) {
         if (target.queue.length < MAX_QUEUE) target.queue.push(out);
       } else {
+        if (users.size >= MAX_TRACKED_USERS) return send(ws, { type: 'error', error: 'unknown-recipient' });
         const t = getUser(to);
         if (t.queue.length < MAX_QUEUE) t.queue.push(out);
       }
@@ -299,6 +343,12 @@ function handle(ws, meta, msg) {
     case 'approve-device': {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
+      const caller = u.devices.get(meta.deviceId);
+      // Nur ein bereits bestaetigtes Geraet darf weitere Geraete freischalten — sonst
+      // koennte sich ein selbst registriertes, nie bestaetigtes Geraet einfach selbst
+      // freischalten (deviceId ist dem Aufrufer immer bekannt) und den gesamten
+      // Bestaetigungsschritt vollstaendig umgehen.
+      if (!caller || !caller.trusted) return send(ws, { type: 'error', error: 'not-trusted' });
       const d = u.devices.get(msg.deviceId);
       if (d) {
         d.trusted = true;
@@ -310,6 +360,11 @@ function handle(ws, meta, msg) {
     case 'revoke-device': {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
+      const caller = u.devices.get(meta.deviceId);
+      // Gleiche Begruendung wie bei approve-device: sonst koennte ein nicht
+      // bestaetigtes Geraet die echten, vertrauenswuerdigen Geraete des Kontos
+      // hinauswerfen (Account-Takeover / Denial-of-Service).
+      if (!caller || !caller.trusted) return send(ws, { type: 'error', error: 'not-trusted' });
       if (u.devices.delete(msg.deviceId)) {
         for (const [sock, m] of sockets) {
           if (m.userId === meta.userId && m.deviceId === msg.deviceId) {
@@ -325,7 +380,10 @@ function handle(ws, meta, msg) {
     case 'lookup': {
       if (!meta.authed) return;
       const target = users.get(msg.userId);
-      const first = target ? [...target.devices.values()][0] : null;
+      // Nur ein bereits bestaetigtes Geraet darf als Handshake-Bundle fuer neue
+      // Kontakte ausgeliefert werden — sonst koennte ein nicht bestaetigtes,
+      // rein selbst-registriertes Geraet neue Konversationen kapern.
+      const first = target ? [...target.devices.values()].find((d) => d.trusted) ?? null : null;
       let otpk = null;
       if (first && msg.forHandshake === true && first.otpks.size > 0) {
         if (!checkRate(otpkLookupRate, meta.userId, OTPK_LOOKUP_RATE_LIMIT, OTPK_LOOKUP_RATE_WINDOW_MS)) {
@@ -369,10 +427,17 @@ function handle(ws, meta, msg) {
   }
 }
 
-server.listen(PORT, HOST, () => {
-  const scheme = useTls ? 'wss' : 'ws';
-  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-  console.log(`RenkerVault Relay laeuft auf ${scheme}://${displayHost}:${PORT} (gebunden an ${HOST})`);
-  console.log(`TLS: ${useTls ? 'AKTIV (natives Zertifikat)' : 'AUS — nur fuer lokale Nutzung/Reverse-Proxy-Setup geeignet, siehe deploy/DEPLOYMENT.md'}`);
-  console.log('Zero-Knowledge-Modus: Server speichert ausschliesslich Chiffretext.');
-});
+setInterval(sweep, SWEEP_INTERVAL_MS).unref();
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  server.listen(PORT, HOST, () => {
+    const scheme = useTls ? 'wss' : 'ws';
+    const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+    console.log(`RenkerVault Relay laeuft auf ${scheme}://${displayHost}:${PORT} (gebunden an ${HOST})`);
+    console.log(`TLS: ${useTls ? 'AKTIV (natives Zertifikat)' : 'AUS — nur fuer lokale Nutzung/Reverse-Proxy-Setup geeignet, siehe deploy/DEPLOYMENT.md'}`);
+    console.log('Zero-Knowledge-Modus: Server speichert ausschliesslich Chiffretext.');
+  });
+}
+
+export { server, sweep, users, MAX_TRACKED_USERS, QUEUE_TTL_MS };

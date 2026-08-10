@@ -5,11 +5,15 @@
   "type": "module",
   "description": "RenkerVault Zero-Knowledge Relay - speichert und routet ausschliesslich Chiffretext",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@noble/curves": "1.9.7",
     "@noble/hashes": "1.8.0",
     "ws": "8.21.0"
+  },
+  "devDependencies": {
+    "vitest": "4.1.10"
   }
 }
