@@ -39,6 +39,14 @@ async function dpapiUnwrap(bytes: Uint8Array): Promise<Uint8Array> {
 
 let masterKey: Uint8Array | null = null;
 
+// Ueberschreibt den in JS sichtbaren Puffer vor dem Dereferenzieren. Kein Garant
+// gegen forensische Wiederherstellung (V8/WebCrypto koennen intern eigene Kopien
+// halten, die von JS aus nicht erreichbar sind), aber entfernt zuverlaessig die
+// laenglebigste, direkt referenzierte Kopie des Master-Keys aus dem Heap.
+function zero(u: Uint8Array | null): void {
+  if (u) u.fill(0);
+}
+
 function macKeyOf(mk: Uint8Array): Uint8Array {
   return hkdfSha256(mk, new Uint8Array(32), 'RenkerVault-Vault-MAC', 32);
 }
@@ -49,10 +57,19 @@ function readFile(): VaultFile | null {
   try { return JSON.parse(raw) as VaultFile; } catch { return null; }
 }
 
+// Bestmoegliches Ueberschreiben vor dem Loeschen. Kein Garant gegen forensische
+// Wiederherstellung auf Storage-Engine-Ebene (LevelDB/SQLite-Backing von Browser
+// bzw. WebView kann durch Compaction weiterhin alte Kopien enthalten), aber
+// entfernt den unmittelbar ueber die localStorage-API sichtbaren Klartext-Slot.
+function secureRemove(key: string): void {
+  for (let i = 0; i < 3; i++) localStorage.setItem(key, b64.enc(rand(4096)));
+  localStorage.removeItem(key);
+}
+
 export function vaultExists(): boolean { return readFile() !== null; }
 export function hasDuressPin(): boolean { return readFile()?.duress != null; }
 export function isUnlocked(): boolean { return masterKey !== null; }
-export function lockVault(): void { masterKey = null; }
+export function lockVault(): void { zero(masterKey); masterKey = null; }
 
 export async function createVault<T>(
   passphrase: string, duressPin: string | null, data: T
@@ -130,6 +147,7 @@ export async function unlockVault<T>(passphrase: string): Promise<UnlockResult<T
   const ct = b64.dec(file.data);
   const expected = hmacSha256(macKeyOf(mk), ct);
   if (!constEq(expected, b64.dec(file.mac))) {
+    zero(mk);
     return { ok: false, reason: 'tampered' };
   }
 
@@ -138,6 +156,7 @@ export async function unlockVault<T>(passphrase: string): Promise<UnlockResult<T
     masterKey = mk;
     return { ok: true, duress: false, data: JSON.parse(utf8.dec(plain)) as T };
   } catch {
+    zero(mk);
     return { ok: false, reason: 'tampered' };
   }
 }
@@ -160,6 +179,7 @@ export function demoTamperVault(): void {
 }
 
 export function destroyVault(): void {
+  zero(masterKey);
   masterKey = null;
-  localStorage.removeItem(LS_KEY);
+  secureRemove(LS_KEY);
 }

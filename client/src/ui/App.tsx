@@ -288,6 +288,10 @@ export default function App() {
           log(ev('warn', 'UNKNOWN_SENDER', `Nachricht von unbekanntem Absender ${from} ohne Handshake-Info ignoriert`));
           return;
         }
+        if (!envelope.x3dh.otpkId && realChat.oneTimePrekeyCount() > 0) {
+          log(ev('warn', 'X3DH_DOWNGRADE',
+            `Eingehende Sitzung von ${from} verhandelt ohne One-Time-Prekey, obwohl eigene OTPKs verfügbar sind — möglicher Hinweis auf einen manipulierenden Relay.`));
+        }
         try { plaintext = await realChat.acceptFirstMessage(myIdentity, from, envelope); }
         catch { log(ev('warn', 'HANDSHAKE_FAIL', `Handshake mit ${from} fehlgeschlagen`)); return; }
         isNew = true;

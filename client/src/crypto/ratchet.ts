@@ -38,46 +38,103 @@ export interface RatchetSnapshot {
   skipped: [string, string][];
 }
 
+interface RatchetState {
+  dhs: KeyPair;
+  dhr: Uint8Array | null;
+  rk: Uint8Array;
+  cks: Uint8Array | null;
+  ckr: Uint8Array | null;
+  ns: number; nr: number; pn: number;
+  skipped: Map<string, Uint8Array>;
+}
+
+function cloneState(s: RatchetState): RatchetState {
+  return {
+    dhs: { priv: s.dhs.priv.slice(), pub: s.dhs.pub.slice() },
+    dhr: s.dhr ? s.dhr.slice() : null,
+    rk: s.rk.slice(),
+    cks: s.cks ? s.cks.slice() : null,
+    ckr: s.ckr ? s.ckr.slice() : null,
+    ns: s.ns, nr: s.nr, pn: s.pn,
+    skipped: new Map(s.skipped),
+  };
+}
+
+// Operiert auf einem Entwurf (draft), niemals direkt auf dem committeten State —
+// Aufrufer (decrypt) verwirft den draft bei Fehlschlag, statt ihn zu übernehmen.
+function skipMessageKeysInto(state: RatchetState, until: number): void {
+  if (!state.ckr) return;
+  if (state.nr + MAX_SKIP < until) throw new Error('Zu viele übersprungene Nachrichten');
+  while (state.nr < until) {
+    const [next, mk] = kdfCk(state.ckr);
+    state.ckr = next;
+    state.skipped.set(`${b64.enc(state.dhr!)}:${state.nr}`, mk);
+    state.nr += 1;
+    if (state.skipped.size > MAX_SKIP) {
+      const first = state.skipped.keys().next().value as string;
+      state.skipped.delete(first);
+    }
+  }
+}
+
+function dhRatchetInto(state: RatchetState, theirDh: Uint8Array): void {
+  state.pn = state.ns;
+  state.ns = 0;
+  state.nr = 0;
+  state.dhr = theirDh;
+  [state.rk, state.ckr] = kdfRk(state.rk, dh(state.dhs.priv, state.dhr));
+  state.dhs = newX25519();
+  [state.rk, state.cks] = kdfRk(state.rk, dh(state.dhs.priv, state.dhr));
+}
+
 export class Ratchet {
-  private dhs: KeyPair;
-  private dhr: Uint8Array | null = null;
-  private rk: Uint8Array;
-  private cks: Uint8Array | null = null;
-  private ckr: Uint8Array | null = null;
-  private ns = 0; private nr = 0; private pn = 0;
-  private skipped = new Map<string, Uint8Array>();
+  private state: RatchetState;
+  // Serialisiert encrypt()/decrypt() auf dieser Instanz. Ohne das würden
+  // überlappende Aufrufe (z. B. paralleles Senden, oder ein Send während ein
+  // Deliver verarbeitet wird) denselben Kettenschlüssel doppelt lesen, bevor
+  // der erste Aufruf committet — Message-Key-Wiederverwendung.
+  private queue: Promise<unknown> = Promise.resolve();
 
   private constructor(rk: Uint8Array, dhs: KeyPair) {
-    this.rk = rk;
-    this.dhs = dhs;
+    this.state = {
+      dhs, dhr: null, rk, cks: null, ckr: null,
+      ns: 0, nr: 0, pn: 0, skipped: new Map(),
+    };
+  }
+
+  private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   toSnapshot(): RatchetSnapshot {
+    const s = this.state;
     return {
-      dhsPriv: b64.enc(this.dhs.priv), dhsPub: b64.enc(this.dhs.pub),
-      dhr: this.dhr ? b64.enc(this.dhr) : null,
-      rk: b64.enc(this.rk),
-      cks: this.cks ? b64.enc(this.cks) : null,
-      ckr: this.ckr ? b64.enc(this.ckr) : null,
-      ns: this.ns, nr: this.nr, pn: this.pn,
-      skipped: [...this.skipped].map(([k, v]) => [k, b64.enc(v)]),
+      dhsPriv: b64.enc(s.dhs.priv), dhsPub: b64.enc(s.dhs.pub),
+      dhr: s.dhr ? b64.enc(s.dhr) : null,
+      rk: b64.enc(s.rk),
+      cks: s.cks ? b64.enc(s.cks) : null,
+      ckr: s.ckr ? b64.enc(s.ckr) : null,
+      ns: s.ns, nr: s.nr, pn: s.pn,
+      skipped: [...s.skipped].map(([k, v]) => [k, b64.enc(v)]),
     };
   }
 
   static fromSnapshot(s: RatchetSnapshot): Ratchet {
     const r = new Ratchet(b64.dec(s.rk), { priv: b64.dec(s.dhsPriv), pub: b64.dec(s.dhsPub) });
-    r.dhr = s.dhr ? b64.dec(s.dhr) : null;
-    r.cks = s.cks ? b64.dec(s.cks) : null;
-    r.ckr = s.ckr ? b64.dec(s.ckr) : null;
-    r.ns = s.ns; r.nr = s.nr; r.pn = s.pn;
-    r.skipped = new Map(s.skipped.map(([k, v]) => [k, b64.dec(v)]));
+    r.state.dhr = s.dhr ? b64.dec(s.dhr) : null;
+    r.state.cks = s.cks ? b64.dec(s.cks) : null;
+    r.state.ckr = s.ckr ? b64.dec(s.ckr) : null;
+    r.state.ns = s.ns; r.state.nr = s.nr; r.state.pn = s.pn;
+    r.state.skipped = new Map(s.skipped.map(([k, v]) => [k, b64.dec(v)]));
     return r;
   }
 
   static initAlice(sharedSecret: Uint8Array, theirRatchetPub: Uint8Array): Ratchet {
     const r = new Ratchet(sharedSecret, newX25519());
-    r.dhr = theirRatchetPub;
-    [r.rk, r.cks] = kdfRk(r.rk, dh(r.dhs.priv, r.dhr));
+    r.state.dhr = theirRatchetPub;
+    [r.state.rk, r.state.cks] = kdfRk(r.state.rk, dh(r.state.dhs.priv, r.state.dhr));
     return r;
   }
 
@@ -86,67 +143,62 @@ export class Ratchet {
   }
 
   async encrypt(plaintext: Uint8Array): Promise<RatchetMessage> {
-    if (!this.cks) throw new Error('Sendekette nicht initialisiert');
-    const [next, mk] = kdfCk(this.cks);
-    this.cks = next;
-    const header: RatchetHeader = { dh: b64.enc(this.dhs.pub), pn: this.pn, n: this.ns };
-    this.ns += 1;
-    const aad = utf8.enc(JSON.stringify(header));
-    const ct = await aesGcmEncrypt(mk, plaintext, aad);
-    return { header, ct: b64.enc(ct) };
+    return this.runExclusive(() => this.doEncrypt(plaintext));
   }
 
   async decrypt(msg: RatchetMessage): Promise<Uint8Array> {
+    return this.runExclusive(() => this.doDecrypt(msg));
+  }
+
+  private async doEncrypt(plaintext: Uint8Array): Promise<RatchetMessage> {
+    const s = this.state;
+    if (!s.cks) throw new Error('Sendekette nicht initialisiert');
+    const [next, mk] = kdfCk(s.cks);
+    const header: RatchetHeader = { dh: b64.enc(s.dhs.pub), pn: s.pn, n: s.ns };
+    const aad = utf8.enc(JSON.stringify(header));
+    const ct = await aesGcmEncrypt(mk, plaintext, aad);
+    // Sendekette erst nach erfolgreicher Verschlüsselung fortschreiben.
+    s.cks = next;
+    s.ns += 1;
+    return { header, ct: b64.enc(ct) };
+  }
+
+  // Entschlüsselt gegen einen Entwurf des States und committet ihn nur bei Erfolg.
+  // Verhindert, dass gefälschte/duplizierte/malformte Nachrichten (z. B. von einem
+  // böswilligen Relay) die Ratchet-Kette durch einen fehlgeschlagenen Zustandsübergang
+  // dauerhaft zerstören — siehe Signal-Spec RatchetDecrypt (state = deepcopy vor Versuch).
+  private async doDecrypt(msg: RatchetMessage): Promise<Uint8Array> {
     const aad = utf8.enc(JSON.stringify(msg.header));
     const data = b64.dec(msg.ct);
 
     const skipKey = `${msg.header.dh}:${msg.header.n}`;
-    const skippedMk = this.skipped.get(skipKey);
+    const skippedMk = this.state.skipped.get(skipKey);
     if (skippedMk) {
-      this.skipped.delete(skipKey);
-      return aesGcmDecrypt(skippedMk, data, aad);
+      const plaintext = await aesGcmDecrypt(skippedMk, data, aad);
+      this.state.skipped.delete(skipKey);
+      return plaintext;
     }
 
+    const draft = cloneState(this.state);
     const theirDh = b64.dec(msg.header.dh);
-    if (!this.dhr || b64.enc(this.dhr) !== msg.header.dh) {
-      this.skipKeys(msg.header.pn);
-      this.dhRatchet(theirDh);
+    if (!draft.dhr || b64.enc(draft.dhr) !== msg.header.dh) {
+      skipMessageKeysInto(draft, msg.header.pn);
+      dhRatchetInto(draft, theirDh);
     }
 
-    this.skipKeys(msg.header.n);
-    if (!this.ckr) throw new Error('Empfangskette nicht initialisiert');
-    const [next, mk] = kdfCk(this.ckr);
-    this.ckr = next;
-    this.nr += 1;
-    return aesGcmDecrypt(mk, data, aad);
+    skipMessageKeysInto(draft, msg.header.n);
+    if (!draft.ckr) throw new Error('Empfangskette nicht initialisiert');
+    const [next, mk] = kdfCk(draft.ckr);
+
+    const plaintext = await aesGcmDecrypt(mk, data, aad);
+
+    draft.ckr = next;
+    draft.nr += 1;
+    this.state = draft;
+    return plaintext;
   }
 
-  get publicKey(): Uint8Array { return this.dhs.pub; }
-
-  private skipKeys(until: number): void {
-    if (!this.ckr) return;
-    if (this.nr + MAX_SKIP < until) throw new Error('Zu viele übersprungene Nachrichten');
-    while (this.nr < until) {
-      const [next, mk] = kdfCk(this.ckr);
-      this.ckr = next;
-      this.skipped.set(`${b64.enc(this.dhr!)}:${this.nr}`, mk);
-      this.nr += 1;
-      if (this.skipped.size > MAX_SKIP) {
-        const first = this.skipped.keys().next().value as string;
-        this.skipped.delete(first);
-      }
-    }
-  }
-
-  private dhRatchet(theirDh: Uint8Array): void {
-    this.pn = this.ns;
-    this.ns = 0;
-    this.nr = 0;
-    this.dhr = theirDh;
-    [this.rk, this.ckr] = kdfRk(this.rk, dh(this.dhs.priv, this.dhr));
-    this.dhs = newX25519();
-    [this.rk, this.cks] = kdfRk(this.rk, dh(this.dhs.priv, this.dhr));
-  }
+  get publicKey(): Uint8Array { return this.state.dhs.pub; }
 }
 
 export function handshakeInitiator(
