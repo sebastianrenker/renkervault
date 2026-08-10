@@ -1,12 +1,23 @@
 # SECURITY.md — Sicherheitsmodell & ehrliche Grenzen
 
-Stand: Prototyp v0.1. Dieses Dokument beschreibt, **was wirklich geschützt
-ist**, welche Kompromisse der Prototyp eingeht und was vor einem echten
-Produktiveinsatz zwingend passieren müsste.
+Stand: Prototyp v0.1, nach dem Security-Hardening-Audit vom 10.08.2026.
+Dieses Dokument beschreibt, **was wirklich geschützt ist**, welche
+Kompromisse der Prototyp eingeht und was vor einem echten Produktiveinsatz
+zwingend passieren müsste.
 
 > Warum diese Architektur bewusst so gewählt wurde (Stichwort „Chat-Kontrolle"
 > / verpflichtendes Client-Side-Scanning): siehe
 > [README.md, Abschnitt „Hintergrund"](README.md#hintergrund-warum-ein-tool-wie-renkervault-gegen-chat-kontrolle).
+
+> **Vertiefende Audit-Dokumente:** [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
+> (was Relay/Tor/Cover-Traffic/PQ konkret schützen — und was nicht),
+> [docs/METADATA.md](docs/METADATA.md) (feldweise Analyse, was der Relay
+> aus jedem Envelope sieht), [docs/FINDINGS.md](docs/FINDINGS.md)
+> (strukturierte Liste aller Audit-Befunde mit Schweregrad, Fix und
+> Regressionstest). Automatisierte Sicherheitstests:
+> `client/tests/security/` (39 Tests: Ratchet, Handshake, Vault) und
+> `server/tests/security/` (12 Tests: Relay-Multi-Device-Trust,
+> Auth-Flow, bounded storage) — `npm test` in `client/` bzw. `server/`.
 
 ---
 
@@ -14,8 +25,8 @@ Produktiveinsatz zwingend passieren müsste.
 
 | Bereich | Schutz | Details |
 |---|---|---|
-| 1:1-Chats | ✅ E2E, Double Ratchet | X3DH-lite-Handshake → Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM). Jede Nachricht eigener Message-Key (PFS); jeder Antwort-Roundtrip frischer Root-Key (Post-Compromise Security). |
-| Gruppen | ✅ E2E, Epoch-Keys | „Sender-Keys-lite": zufälliger 256-Bit-Gruppenschlüssel pro Epoche; jede Mitgliederänderung erzeugt eine neue Epoche (Entfernte lesen nichts Späteres). Schwächer als 1:1 (keine PFS pro Nachricht innerhalb einer Epoche). |
+| 1:1-Chats | ✅ E2E, Double Ratchet | X3DH-Hybrid-Handshake (X25519 + ML-KEM-768, mit One-Time-Prekey wenn verfügbar, siehe Abschnitt 4b) → Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM). Jede Nachricht eigener Message-Key (PFS); jeder Antwort-Roundtrip frischer Root-Key (Post-Compromise Security). Ratchet-Implementierung im Security-Audit vom 10.08.2026 geprüft und gehärtet (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-001/002). |
+| Gruppen | ⚠️ E2E, aber strukturell schwächer als 1:1 | Zufälliger 256-Bit-Gruppenschlüssel pro Epoche; jede Mitgliederänderung erzeugt verifiziert eine neue Epoche (Entfernte lesen nichts Späteres). **Ehrliche Grenze (Audit 10.08.2026):** kein Forward-Secrecy-Schutz *innerhalb* einer Epoche (ein kompromittierter Epoch-Key entschlüsselt alle Nachrichten der Epoche rückwirkend) und keine kryptographische Absender-Authentifizierung zwischen Mitgliedern. Für kleine, gegenseitig vertrauende Gruppen geeignet, nicht für Szenarien mit potenziell böswilligen Mitgliedern. Details + Migrationsempfehlung (Sender-Keys/MLS): [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/FINDINGS.md](docs/FINDINGS.md) FINDING-010. |
 | Kanäle | ⚠ Verschlüsselt, aber schwächeres Vertrauensmodell | Kanal-Epoch-Key; Owner/Admins senden. Der Sender kennt zwangsläufig die Abonnentenliste; bei großen Kanälen ist der Schlüssel breit verteilt — eher „verschlüsselter Broadcast" als vertrauliche Kommunikation. |
 | Lokale Datenbank | ✅ At-Rest | Argon2id (Passphrase) → KEK → wrappt zufälligen Master-Key → AES-256-GCM über den gesamten Zustand. HMAC-SHA256 über den Ciphertext als Manipulationsschutz. Kein Klartext auf der Platte. |
 | Relay-Server | ✅ Zero-Knowledge | Sieht nur: Konto-IDs, öffentliche Schlüssel, Geräte-Metadaten, opake Envelopes. Auth per Ed25519-Challenge-Response (passwortlos). |
@@ -27,9 +38,15 @@ Produktiveinsatz zwingend passieren müsste.
   identische Logik im Relay (Rate-Limit 30 msg/s pro Socket, Lockout-Broadcast
   an alle Geräte des Kontos).
 - **Neue Geräte:** Jedes weitere Gerät ist zunächst `untrusted` und erhält
-  keine Nachrichten-Queue, bis es von einem bestehenden Gerät manuell
-  bestätigt wird. Meldet sich eine bekannte Geräte-ID mit anderem Schlüssel →
-  `KEY_MISMATCH`-Alarm (möglicher Impersonations-Versuch).
+  weder die Offline-Warteschlange noch live zugestellte Nachrichten, bis es
+  von einem bereits bestätigten Gerät manuell freigeschaltet wird. Meldet
+  sich eine bekannte Geräte-ID mit anderem Schlüssel → `KEY_MISMATCH`-Alarm
+  (möglicher Impersonations-Versuch). **Serverseitig durchgesetzt** seit dem
+  Security-Audit vom 10.08.2026 — zuvor war die Bestätigungspflicht nur
+  Client-UI-Konvention, der Relay selbst prüfte weder bei Live-Zustellung
+  noch bei `approve-device`/`revoke-device` den Trust-Status des Aufrufers
+  (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-004/005/006 — P0,
+  behoben, mit Regressionstests in `server/tests/security/relay.test.ts`).
 - **DB-Manipulation:** HMAC-Prüfung beim Entsperren und auf Abruf. Fehlschlag
   → Alarm + optionaler Auto-Lockdown (nur Alarm-Screen sichtbar).
 - **Duress-PIN:** separater Argon2id-Hash; die PIN öffnet eine leere
@@ -125,7 +142,17 @@ Empfänger löst trotzdem korrekt auf).
    Sitzungen und Gruppenschlüssel dagegen WERDEN persistiert** (verschlüsselt
    im Vault), da sonst zwei echte Gesprächspartner nach einem Neustart
    auseinanderlaufen würden.
-5. **localStorage statt SQLCipher:** Browser-Prototyp. Das Schlüsselmodell
+5. **Memory-/Storage-Härtung (Audit 10.08.2026):** Der Master-Key wird beim
+   Sperren/Zerstören des Vaults jetzt explizit im JS-Heap mit Nullen
+   überschrieben (`crypto/vault.ts`, `zero()`), bevor die Referenz fällt;
+   `destroyVault()` überschreibt den `localStorage`-Slot dreimal mit
+   Zufallsdaten, bevor er entfernt wird. **Ehrlich dokumentierte Grenze:**
+   Keine Garantie — V8s Garbage Collector und die WebCrypto-Implementierung
+   können eigene, aus JS nicht erreichbare Kopien halten, und die
+   Storage-Engine (LevelDB/SQLite-Backing) kann durch Compaction weiterhin
+   ältere Kopien enthalten. Details: [docs/FINDINGS.md](docs/FINDINGS.md),
+   FINDING-008/009.
+6. **localStorage statt SQLCipher:** Browser-Prototyp. Das Schlüsselmodell
    (Argon2id → KEK → Master-Key → AES-GCM + HMAC) ist identisch übertragbar;
    eine Desktop-Variante (Tauri) sollte SQLCipher + OS-Keychain nutzen.
    **Bewusst noch nicht umgesetzt** (Härtungs-Roadmap Punkt 8): Das ist keine
@@ -160,10 +187,19 @@ Empfänger löst trotzdem korrekt auf).
    nicht ansteuerbar) — vor Produktiveinsatz manuell auf echtem Windows mit
    `npm run tauri dev` nachzuholen. macOS (Keychain) und Android
    (Keystore) sind analog denkbar, aber nicht umgesetzt.
-6. **Relay hält Zustand nur im RAM** (Prototyp): Konten/Queues gehen bei
+7. **Relay hält Zustand nur im RAM** (Prototyp): Konten/Queues gehen bei
    Neustart verloren. Produktion: PostgreSQL für Metadaten, persistente
-   verschlüsselte Offline-Queues.
-7. **Metadaten:** Der Relay sieht wer-mit-wem-wann (Routing). ~~Schutz
+   verschlüsselte Offline-Queues. **Seit dem Audit vom 10.08.2026 bounded
+   statt unbounded:** eine harte Obergrenze für die Gesamtzahl verwalteter
+   Konten (`MAX_TRACKED_USERS`, 200.000) sowie ein periodischer Sweep
+   (alle 10 Minuten) entfernen abgelaufene Warteschlangen-Einträge (TTL
+   14 Tage) und geräteloses Phantom-Konten — verhindert unbegrenztes
+   Speicherwachstum durch Nachrichten an frei erfundene Ziel-userIds
+   (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-007). Eine echte
+   Persistenzschicht bleibt trotzdem offen — das bounded-RAM-Verhalten ist
+   eine Absicherung gegen Ressourcenerschöpfung, kein Ersatz für
+   Neustart-Persistenz.
+8. **Metadaten:** Der Relay sieht wer-mit-wem-wann (Routing). ~~Schutz
    dagegen (Sealed Sender...) ist nicht implementiert~~ — für 1:1-Folge-
    nachrichten seit diesem Update teilweise umgesetzt (Abschnitt 3a).
    ~~Padding und Cover-Traffic bleiben offen~~ — seit diesem Update ebenfalls
@@ -172,20 +208,20 @@ Empfänger löst trotzdem korrekt auf).
    `send`-Nachricht schickt (Timing des Verbindungsaufbaus selbst), Padding/
    Cover-Traffic verschleiern nur Größe und Sendehäufigkeit der Nachrichten
    danach, nicht die Tatsache der Verbindung an sich.
-8. **Web-Auslieferung:** Eine Web-App kann vom Server kompromittiert
+9. **Web-Auslieferung:** Eine Web-App kann vom Server kompromittiert
    ausgeliefert werden (malicious JS). Ernsthafter Einsatz braucht signierte
    Desktop-/Mobile-Builds (Tauri/Capacitor, siehe README „Deployment").
-9. **Argon2id-Parameter** (64 MiB, t=4, siehe `crypto/primitives.ts`) sind ein
+10. **Argon2id-Parameter** (64 MiB, t=4, siehe `crypto/primitives.ts`) sind ein
    Kompromiss zwischen Sicherheit und Entsperr-Latenz auf schwächerer
    Hardware; für einen dedizierten Produktivbetrieb weiter nach OWASP und
    Ziel-Hardware kalibrieren.
-10. **Kein Schutz gegen kompromittiertes Endgerät.** Malware/Keylogger auf dem
+11. **Kein Schutz gegen kompromittiertes Endgerät.** Malware/Keylogger auf dem
     Gerät sieht alles — das kann keine E2E-Verschlüsselung verhindern.
-11. **Anhang-/Sprachnachrichtengröße:** 1,2 MB Rohdaten pro Anhang (Prototyp-
+12. **Anhang-/Sprachnachrichtengröße:** 1,2 MB Rohdaten pro Anhang (Prototyp-
     Obergrenze, siehe `MAX_FILE_BYTES` in `ui/App.tsx` und `MAX_MSG_BYTES` in
     `server/src/index.js`) — ausreichend für Bilder/kurze Sprachnachrichten,
     nicht für Videos.
-12. **Relay-Rate-Limiting ist absichtlich einfach gehalten:** Verbindungs-
+13. **Relay-Rate-Limiting ist absichtlich einfach gehalten:** Verbindungs-
     deckel pro IP (20), Auth-Timeout (15 s), ein Pro-Socket-Nachrichtenlimit
     (30/s) sowie zwei zusätzliche, **kontobezogene** Limits (unabhängig von
     der Anzahl gleichzeitig verbundener Geräte desselben Kontos) — ein
@@ -384,7 +420,7 @@ begründet (Ziel: Überwachungsresistenz, nicht nur Inhalts-Vertraulichkeit).
   Verschleierung schwächer als bei vielen. Kostet dauerhaft etwas
   Bandbreite/Akku, auch wenn niemand aktiv chattet. Verschleiert Größe und
   Sendehäufigkeit — verschleiert NICHT, dass überhaupt eine authentifizierte
-  Verbindung zum Relay besteht (siehe Punkt 7 oben).
+  Verbindung zum Relay besteht (siehe Punkt 8 oben).
 
 ## 4h. Reproduzierbare Builds (Vorstufe zu signierten Builds, Härtungs-Roadmap Punkt 2)
 
@@ -436,12 +472,21 @@ begründet (Ziel: Überwachungsresistenz, nicht nur Inhalts-Vertraulichkeit).
 - ~~Dependency-Pinning + Supply-Chain-Prüfung~~ — seit diesem Update umgesetzt
   (Abschnitt 4f).
 - Hardware-gebundener Vault-Schlüssel und SQLCipher+OS-Keychain für die
-  Tauri-Desktop-Variante — Architektur skizziert (Abschnitt 4 Punkt 5),
+  Tauri-Desktop-Variante — Architektur skizziert (Abschnitt 4 Punkt 6),
   Umsetzung bewusst zurückgestellt (nur auf echter Hardware/einem
   laufenden Tauri-Prozess verifizierbar, siehe docs/inventions/
   RenkerVault-Haertungs-Roadmap.md, Punkte 6 und 8).
 - Threat-Model-Review (formal), Pen-Test des Relay — Scope-Dokument bereits
   vorhanden: [docs/inventions/RenkerVault-Audit-Vorbereitung.md](docs/inventions/RenkerVault-Audit-Vorbereitung.md).
+- Migration der Gruppenverschlüsselung auf eine etablierte Konstruktion
+  (Sender-Keys/MLS) — aktuelles Modell für kleine, vertrauende Gruppen
+  ausreichend, nicht für Szenarien mit potenziell böswilligen Mitgliedern
+  (siehe [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)).
+- **Externes** Kryptografie-Audit bleibt trotz des internen
+  Security-Hardening-Audits vom 10.08.2026 offen — Details, was dieses
+  interne Audit abgedeckt hat und was nicht, siehe
+  [docs/THREAT_MODEL.md, Abschnitt „Auditierte vs. nicht auditierte
+  Teile"](docs/THREAT_MODEL.md#auditierte-vs-nicht-auditierte-teile).
 
 ## 6. Meldung von Sicherheitslücken
 
