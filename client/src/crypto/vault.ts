@@ -185,7 +185,21 @@ export async function changePassphrase(oldPassphrase: string, newPassphrase: str
   return { ok: true };
 }
 
+// Öffentlicher Einstiegspunkt: fängt JEDE unerwartete Exception ab (z. B.
+// ungültiges Base64 in einem manipulierten/korrupten Feld, das atob() nicht
+// dekodieren kann) und behandelt sie als "tampered" statt sie ungefangen
+// durchzureichen. Von Fuzzing-Tests gefunden (fuzz-vault.test.ts) — eine
+// manipulierte Vault-Datei darf die App nie zum Absturz bringen.
 export async function unlockVault<T>(passphrase: string): Promise<UnlockResult<T>> {
+  try {
+    return await unlockVaultInner<T>(passphrase);
+  } catch (err) {
+    if (err instanceof KdfExecutionError) return { ok: false, reason: 'kdf-error' };
+    return { ok: false, reason: 'tampered' };
+  }
+}
+
+async function unlockVaultInner<T>(passphrase: string): Promise<UnlockResult<T>> {
   const file = readFile();
   if (!file) return { ok: false, reason: 'missing' };
 
@@ -267,11 +281,15 @@ export function checkIntegrity(): 'ok' | 'tampered' | 'missing' | 'locked' {
   const file = readFile();
   if (!file) return 'missing';
   if (!masterKey) return 'locked';
-  const ct = b64.dec(file.data);
-  const expected = file.generation === undefined
-    ? hmacSha256(macKeyOf(masterKey), ct)
-    : hmacSha256(macKeyOf(masterKey), macInput(ct, file.generation));
-  return constEq(expected, b64.dec(file.mac)) ? 'ok' : 'tampered';
+  try {
+    const ct = b64.dec(file.data);
+    const expected = file.generation === undefined
+      ? hmacSha256(macKeyOf(masterKey), ct)
+      : hmacSha256(macKeyOf(masterKey), macInput(ct, file.generation));
+    return constEq(expected, b64.dec(file.mac)) ? 'ok' : 'tampered';
+  } catch {
+    return 'tampered';
+  }
 }
 
 export function demoTamperVault(): void {

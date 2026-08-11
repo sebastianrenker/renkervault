@@ -347,6 +347,41 @@ Onboarding-UX, siehe Begründung).
 
 ---
 
+### FINDING-013 — P1 — Ungefangene Exception bei korrupter Vault-Datei (durch Fuzzing gefunden)
+**Komponente:** Lokale Vault-Sicherheit
+**Datei:** `client/src/crypto/vault.ts`, `unlockVault()`, `checkIntegrity()`
+**Problem:** `b64.dec()` (Wrapper um `atob()`) wirft eine `InvalidCharacterError`,
+wenn ein Feld der Vault-Datei kein gültiges Base64 enthält. Diese Exception
+war an mehreren Stellen in `unlockVault()`/`checkIntegrity()` nicht
+gefangen — eine manipulierte oder anderweitig korrupte Vault-Datei
+(z. B. `kdfSalt`/`data`/`mac` mit ungültigen Zeichen) ließ die Funktion
+mit einer ungefangenen Exception abstürzen, statt kontrolliert
+`{ok: false, reason: 'tampered'}` zurückzugeben.
+**Gefunden durch:** Property-based Fuzzing (`client/tests/security/fuzz-vault.test.ts`,
+`fast-check`) — zufällige Storage-Inhalte und Ein-Byte-Mutationen einer
+echten Vault-Datei deckten den Fall innerhalb weniger Testläufe auf.
+**Angriffsszenario:** Jede Form von Datei-Korruption (Festplattenfehler,
+unvollständiger Schreibvorgang, gezielte Manipulation) mit einem Treffer
+in einem Base64-kodierten Feld ließ die App beim Entsperrversuch
+abstürzen/hängen bleiben, statt die erwartete, bereits vorhandene
+Tamper-Erkennung greifen zu lassen.
+**Impact:** Kein Vertraulichkeitsbruch (die Exception verhindert eher zu
+viel als zu wenig), aber ein Verfügbarkeits-/Robustheitsfehler genau in
+dem Codepfad, der Manipulation eigentlich sicher erkennen soll.
+**Likelihood:** Mittel — jede Art von Datei-Korruption kann das auslösen,
+nicht nur gezielte Angriffe.
+**Fix:** `unlockVault()` ist jetzt in eine äußere Funktion mit
+Catch-All gekapselt (`unlockVaultInner` + Wrapper), die jede unerwartete
+Exception als `tampered` behandelt; `checkIntegrity()` hat einen
+eigenen try/catch um die Decode-/Vergleichslogik.
+**Regressionstest:** `client/tests/security/fuzz-vault.test.ts` — drei
+Property-Tests (beliebiger Storage-Inhalt, beliebiges valides JSON,
+Ein-Byte-Mutation einer echten Vault-Datei), je 25–200 randomisierte
+Läufe, alle grün.
+**Status:** ✅ Behoben.
+
+---
+
 ## Zusammenfassung
 
 | ID | Titel | Schwere | Status |
@@ -363,10 +398,11 @@ Onboarding-UX, siehe Begründung).
 | FINDING-010 | Gruppen: keine FS/Sender-Auth pro Epoche | P2 | ⚠️ Dokumentiert |
 | FINDING-011 | OTPK-Erschöpfung ohne Handshake-Abschluss | P3 | ⚠️ Dokumentiert |
 | FINDING-012 | Geräteliste ohne Trust-Check abrufbar | P3 | ⚠️ Dokumentiert |
+| FINDING-013 | Ungefangene Exception bei korrupter Vault-Datei (Fuzzing) | P1 | ✅ Behoben |
 
 **Alle P0- und P1-Befunde sind behoben und durch echte, automatisierte
-Regressionstests abgedeckt** (39 Tests in `client/tests/security/`, 12
-Tests in `server/tests/security/`, insgesamt 51 Tests, alle grün,
+Regressionstests abgedeckt** (67 Tests in `client/tests/security/`, 20
+Tests in `server/tests/security/`, insgesamt 87 Tests, alle grün,
 Typecheck und Build sauber). Verbleibende P2/P3-Befunde sind entweder
 bestmöglich gehärtet mit ehrlich dokumentierter Restgrenze, oder bewusst
 zurückgestellte, größere Architekturthemen mit klarer Begründung.
