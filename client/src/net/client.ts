@@ -35,6 +35,8 @@ export interface LookupResult {
   xPub: string | null;
   prekeyPub: string | null;
   pqPrekeyPub: string | null;
+  prekeySig: string | null;
+  pqPrekeySig: string | null;
   otpk: { id: string; pub: string } | null;
 }
 
@@ -83,6 +85,8 @@ export class RelayClient {
         xPub: identity.xPub,
         prekeyPub: identity.prekeyPub,
         pqPrekeyPub: identity.pqPrekeyPub,
+        prekeySig: identity.prekeySig,
+        pqPrekeySig: identity.pqPrekeySig,
       });
     };
 
@@ -130,6 +134,7 @@ export class RelayClient {
               userId: msg.userId, found: !!msg.found,
               edPub: msg.edPub ?? null, xPub: msg.xPub ?? null, prekeyPub: msg.prekeyPub ?? null,
               pqPrekeyPub: msg.pqPrekeyPub ?? null,
+              prekeySig: msg.prekeySig ?? null, pqPrekeySig: msg.pqPrekeySig ?? null,
               otpk: msg.otpk ?? null,
             });
           }
@@ -156,7 +161,7 @@ export class RelayClient {
   lookup(userId: string, forHandshake = false): Promise<LookupResult> {
     return new Promise((resolve) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        return resolve({ userId, found: false, edPub: null, xPub: null, prekeyPub: null, pqPrekeyPub: null, otpk: null });
+        return resolve({ userId, found: false, edPub: null, xPub: null, prekeyPub: null, pqPrekeyPub: null, prekeySig: null, pqPrekeySig: null, otpk: null });
       }
       const ref = `lk-${Math.random().toString(36).slice(2)}`;
       this.pendingLookups.set(ref, { resolve });
@@ -164,7 +169,7 @@ export class RelayClient {
       setTimeout(() => {
         if (this.pendingLookups.has(ref)) {
           this.pendingLookups.delete(ref);
-          resolve({ userId, found: false, edPub: null, xPub: null, prekeyPub: null, pqPrekeyPub: null, otpk: null });
+          resolve({ userId, found: false, edPub: null, xPub: null, prekeyPub: null, pqPrekeyPub: null, prekeySig: null, pqPrekeySig: null, otpk: null });
         }
       }, LOOKUP_TIMEOUT_MS);
     });
