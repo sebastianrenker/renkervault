@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { RelayStatus } from '../net/client';
 import { ARGON2 } from '../crypto/primitives';
 import { DeviceInfo, Identity } from '../state/types';
@@ -14,7 +15,32 @@ export function SecurityCenter(props: {
   onRevoke: (id: string) => void;
   onCheckIntegrity: () => void;
   onRotateAll: () => void;
+  onChangePassphrase: (oldPass: string, newPass: string) => Promise<{ ok: boolean; reason?: string }>;
 }) {
+  const [oldPass, setOldPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [newPass2, setNewPass2] = useState('');
+  const [ppMsg, setPpMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ppBusy, setPpBusy] = useState(false);
+
+  const submitPassphraseChange = async () => {
+    setPpMsg(null);
+    if (newPass.length < 8) return setPpMsg({ ok: false, text: 'Neue Passphrase: mindestens 8 Zeichen.' });
+    if (newPass !== newPass2) return setPpMsg({ ok: false, text: 'Neue Passphrasen stimmen nicht überein.' });
+    setPpBusy(true);
+    try {
+      const res = await props.onChangePassphrase(oldPass, newPass);
+      if (res.ok) {
+        setPpMsg({ ok: true, text: 'Passphrase geändert.' });
+        setOldPass(''); setNewPass(''); setNewPass2('');
+      } else {
+        setPpMsg({ ok: false, text: res.reason === 'wrong-pass' ? 'Alte Passphrase falsch.' : 'Änderung fehlgeschlagen.' });
+      }
+    } finally {
+      setPpBusy(false);
+    }
+  };
+
   return (
     <main className="main panel">
       <div className="page">
@@ -84,6 +110,28 @@ export function SecurityCenter(props: {
           <button className="btn" style={{ marginTop: 10 }} onClick={props.onRotateAll}>
             ⟳ Alle Gruppen-/Kanal-Schlüssel jetzt rotieren
           </button>
+        </div>
+
+        <div className="card">
+          <h4>Passphrase ändern</h4>
+          <p className="dim tiny" style={{ lineHeight: 1.6, marginBottom: 8 }}>
+            Ändert nur die Passphrase, die den Tresor entsperrt — bestehende
+            Kontakte, Sitzungen und Nachrichten bleiben unverändert erhalten.
+          </p>
+          <input className="input" type="password" placeholder="Aktuelle Passphrase"
+            value={oldPass} onChange={(e) => setOldPass(e.target.value)} style={{ marginBottom: 8 }} />
+          <input className="input" type="password" placeholder="Neue Passphrase (min. 8 Zeichen)"
+            value={newPass} onChange={(e) => setNewPass(e.target.value)} style={{ marginBottom: 8 }} />
+          <input className="input" type="password" placeholder="Neue Passphrase wiederholen"
+            value={newPass2} onChange={(e) => setNewPass2(e.target.value)} style={{ marginBottom: 8 }} />
+          <button className="btn" disabled={ppBusy || !oldPass || !newPass} onClick={submitPassphraseChange}>
+            {ppBusy ? 'Ändere…' : 'Passphrase ändern'}
+          </button>
+          {ppMsg && (
+            <div className="tiny" style={{ marginTop: 8, color: ppMsg.ok ? 'var(--acc)' : 'var(--danger)' }}>
+              {ppMsg.ok ? '✓' : '✖'} {ppMsg.text}
+            </div>
+          )}
         </div>
 
         <div className="card">

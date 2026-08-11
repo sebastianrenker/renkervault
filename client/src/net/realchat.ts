@@ -1,5 +1,5 @@
 import {
-  KeyPair, aesGcmDecrypt, aesGcmEncrypt, b64, hex, hkdfSha256, newX25519, rand, sha256Bytes, utf8,
+  KeyPair, aesGcmDecrypt, aesGcmEncrypt, b64, edVerify, hex, hkdfSha256, newX25519, rand, sha256Bytes, utf8,
 } from '../crypto/primitives';
 import { padToTier, unpadFromTier } from '../crypto/padding';
 import {
@@ -26,7 +26,7 @@ function isCoverTrafficMarker(plaintext: Uint8Array): boolean {
   return diff === 0;
 }
 
-class RealChatEngine {
+export class RealChatEngine {
   private ratchets = new Map<string, Ratchet>();
   private pendingHandshake = new Map<string, { ephPub: string; pqCt: string; otpkId?: string }>();
   private groupKeys = new Map<string, { key: Uint8Array; epoch: number }>();
@@ -122,7 +122,27 @@ class RealChatEngine {
     this.sessionTags.delete(peerId);
   }
 
+  // Prueft, dass Prekey und PQ-Prekey nachweisbar vom Identitaetsschluessel
+  // dieses Kontakts signiert wurden (klassisches X3DH-Element), statt sie
+  // vom Relay-Lookup ungeprueft zu uebernehmen — ein manipulierender Relay
+  // koennte sonst bei der Erstkontakt-Anfrage einen eigenen Prekey
+  // unterschieben (siehe SECURITY_AUDIT.md, PREKEY-SIG). Wirft, wenn keine
+  // gueltige Signatur vorliegt — der Aufrufer muss das als Fehlschlag
+  // behandeln, nicht stillschweigend fortfahren.
+  private verifyPrekeyBinding(contact: Contact): void {
+    if (!contact.edPub || !contact.prekeySig || !contact.pqPrekeySig) {
+      throw new Error('Prekey-Signatur fehlt — Kontakt kann nicht vertrauenswürdig kontaktiert werden');
+    }
+    const edPub = b64.dec(contact.edPub);
+    const prekeyOk = edVerify(b64.dec(contact.prekeySig), b64.dec(contact.prekeyPub), edPub);
+    const pqPrekeyOk = edVerify(b64.dec(contact.pqPrekeySig), b64.dec(contact.pqPrekeyPub), edPub);
+    if (!prekeyOk || !pqPrekeyOk) {
+      throw new Error('Prekey-Signatur ungültig — möglicher Substitutionsversuch durch den Relay');
+    }
+  }
+
   beginSession(myIdentity: Identity, contact: Contact, theirOtpk?: { id: string; pub: string }): void {
+    this.verifyPrekeyBinding(contact);
     const myX: KeyPair = { priv: b64.dec(myIdentity.xPriv), pub: b64.dec(myIdentity.xPub) };
     const theirPrekeyPub = b64.dec(contact.prekeyPub);
     const { sk, ephPub, pqCipherText } = handshakeInitiator(
@@ -204,7 +224,14 @@ class RealChatEngine {
     return { epoch, fp: groupFingerprint(key, epoch) };
   }
 
-  applyGroupKey(chatId: string, keyB64: string, epoch: number): string {
+  // Lehnt eine group-key-Nachricht ab, deren Epoche nicht strikt größer als
+  // die zuletzt bekannte ist. Ohne diese Prüfung könnte eine erneut
+  // zugestellte (replayte) alte group-key-Nachricht einen bereits rotierten
+  // — potenziell kompromittierten — Gruppenschlüssel wieder aktivieren und
+  // damit die Post-Compromise-Security der Epochen-Rotation aushebeln.
+  applyGroupKey(chatId: string, keyB64: string, epoch: number): string | null {
+    const existing = this.groupKeys.get(chatId);
+    if (existing && epoch <= existing.epoch) return null;
     const key = b64.dec(keyB64);
     this.groupKeys.set(chatId, { key, epoch });
     return groupFingerprint(key, epoch);

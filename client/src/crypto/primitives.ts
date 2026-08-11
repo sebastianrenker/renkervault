@@ -53,6 +53,10 @@ export const dh = (priv: Uint8Array, pub: Uint8Array): Uint8Array =>
 export const edSign = (msg: Uint8Array, priv: Uint8Array): Uint8Array =>
   ed25519.sign(msg, priv);
 
+export function edVerify(sig: Uint8Array, msg: Uint8Array, pub: Uint8Array): boolean {
+  try { return ed25519.verify(sig, msg, pub); } catch { return false; }
+}
+
 export const sha256Bytes = (data: Uint8Array): Uint8Array => sha256(data);
 
 export const hmacSha256 = (key: Uint8Array, data: Uint8Array): Uint8Array =>
@@ -86,16 +90,32 @@ export async function aesGcmDecrypt(
 
 export const ARGON2 = { iterations: 4, memorySizeKiB: 64 * 1024, parallelism: 1 };
 
+// Eigene Fehlerklasse, damit Aufrufer einen echten Argon2id-Ausführungsfehler
+// (z. B. zu wenig Speicher für 64 MiB auf sehr begrenzter Hardware) von einem
+// falschen Passwort unterscheiden können, statt beides als "falsches
+// Passwort" misszudeuten.
+export class KdfExecutionError extends Error {
+  constructor(cause: unknown) {
+    super('Argon2id-Ausführung fehlgeschlagen (z. B. zu wenig Arbeitsspeicher)');
+    this.name = 'KdfExecutionError';
+    this.cause = cause;
+  }
+}
+
 export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<Uint8Array> {
-  return argon2id({
-    password: passphrase,
-    salt,
-    iterations: ARGON2.iterations,
-    memorySize: ARGON2.memorySizeKiB,
-    parallelism: ARGON2.parallelism,
-    hashLength: 32,
-    outputType: 'binary',
-  });
+  try {
+    return await argon2id({
+      password: passphrase,
+      salt,
+      iterations: ARGON2.iterations,
+      memorySize: ARGON2.memorySizeKiB,
+      parallelism: ARGON2.parallelism,
+      hashLength: 32,
+      outputType: 'binary',
+    });
+  } catch (err) {
+    throw new KdfExecutionError(err);
+  }
 }
 
 export function constEq(a: Uint8Array, b: Uint8Array): boolean {

@@ -11,6 +11,14 @@ const HOST = process.env.HOST || '0.0.0.0';
 const TLS_CERT_FILE = process.env.TLS_CERT_FILE || '';
 const TLS_KEY_FILE = process.env.TLS_KEY_FILE || '';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+// Kommagetrennte Liste erlaubter Origins fuer Browser-Clients (z. B.
+// "https://chat.example.com"). Nativen Clients (Tauri/Android) fehlt der
+// Origin-Header meist ganz — die werden unabhaengig davon durchgelassen.
+// Leer/unset = keine Origin-Pruefung (Standardverhalten fuer lokale
+// Entwicklung, wo Web-Client und Relay bewusst auf unterschiedlichen
+// localhost-Ports laufen).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 
 const users = new Map();
 const authGuard = new Map();
@@ -18,6 +26,7 @@ const sockets = new Map();
 const connsByIp = new Map();
 const sendRateByAccount = new Map();
 const otpkLookupRate = new Map();
+const lookupRate = new Map();
 
 const FAIL_WINDOW_MS = 5 * 60 * 1000;
 const FAIL_LIMIT = 5;
@@ -32,6 +41,13 @@ const SEND_RATE_WINDOW_MS = 60 * 1000;
 const SEND_RATE_LIMIT = 300;
 const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
 const OTPK_LOOKUP_RATE_LIMIT = 20;
+// Deckt auch reine Info-Lookups (forHandshake=false) ab, damit
+// User-Enumeration ("welche userId existiert") nicht ueber diesen Pfad
+// beliebig beschleunigt werden kann — grosszuegiger als das strengere
+// OTPK-Lookup-Limit oben, da normale Lookups (Kontaktnamen auffrischen)
+// im normalen Betrieb haeufiger vorkommen.
+const LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
+const LOOKUP_RATE_LIMIT = 60;
 // Begrenzt, wie viele Konten (echte + durch "send" an unbekannte Empfaenger
 // automatisch angelegte Phantom-Konten) der Prozess insgesamt im Speicher haelt —
 // ohne diese Grenze koennte ein authentifizierter Absender durch Nachrichten an
@@ -155,7 +171,16 @@ const server = useTls
   ? https.createServer({ cert: fs.readFileSync(TLS_CERT_FILE), key: fs.readFileSync(TLS_KEY_FILE) }, requestHandler)
   : http.createServer(requestHandler);
 
-const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_BYTES });
+function verifyClient(info, cb) {
+  const origin = info.req.headers.origin;
+  // Kein Origin-Header (native Clients wie Tauri/Android senden meist
+  // keinen browser-typischen Origin) -> nicht pruefbar, durchlassen.
+  if (!origin || ALLOWED_ORIGINS.length === 0) return cb(true);
+  if (ALLOWED_ORIGINS.includes(origin)) return cb(true);
+  cb(false, 403, 'origin-not-allowed');
+}
+
+const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_BYTES, verifyClient });
 
 function clientIp(req) {
   if (TRUST_PROXY) {
@@ -215,7 +240,7 @@ wss.on('connection', (ws, req) => {
 function handle(ws, meta, msg) {
   switch (msg.type) {
     case 'hello': {
-      const { userId, deviceId, deviceName, edPub, xPub, prekeyPub, pqPrekeyPub } = msg;
+      const { userId, deviceId, deviceName, edPub, xPub, prekeyPub, pqPrekeyPub, prekeySig, pqPrekeySig } = msg;
       if (!userId || !deviceId || !edPub || !xPub) return send(ws, { type: 'error', error: 'bad-hello' });
 
       const g = guard(userId);
@@ -235,6 +260,8 @@ function handle(ws, meta, msg) {
           xPub,
           prekeyPub: prekeyPub || null,
           pqPrekeyPub: pqPrekeyPub || null,
+          prekeySig: prekeySig || null,
+          pqPrekeySig: pqPrekeySig || null,
           otpks: new Map(),
           trusted: isFirstDevice,
           createdAt: now(),
@@ -250,6 +277,8 @@ function handle(ws, meta, msg) {
       } else {
         if (prekeyPub) existing.prekeyPub = prekeyPub;
         if (pqPrekeyPub) existing.pqPrekeyPub = pqPrekeyPub;
+        if (prekeySig) existing.prekeySig = prekeySig;
+        if (pqPrekeySig) existing.pqPrekeySig = pqPrekeySig;
       }
 
       meta.userId = userId;
@@ -379,6 +408,9 @@ function handle(ws, meta, msg) {
 
     case 'lookup': {
       if (!meta.authed) return;
+      if (!checkRate(lookupRate, meta.userId, LOOKUP_RATE_LIMIT, LOOKUP_RATE_WINDOW_MS)) {
+        return send(ws, { type: 'error', error: 'lookup-rate-limited', ref: msg.ref ?? null });
+      }
       const target = users.get(msg.userId);
       // Nur ein bereits bestaetigtes Geraet darf als Handshake-Bundle fuer neue
       // Kontakte ausgeliefert werden — sonst koennte ein nicht bestaetigtes,
@@ -402,6 +434,8 @@ function handle(ws, meta, msg) {
         xPub: first?.xPub ?? null,
         prekeyPub: first?.prekeyPub ?? null,
         pqPrekeyPub: first?.pqPrekeyPub ?? null,
+        prekeySig: first?.prekeySig ?? null,
+        pqPrekeySig: first?.pqPrekeySig ?? null,
         otpk,
         ref: msg.ref ?? null,
       });

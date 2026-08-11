@@ -65,6 +65,7 @@ export function UnlockVault(props: {
   alarm: boolean;
   onReset: () => void;
   deviceMismatch?: boolean;
+  kdfError?: boolean;
 }) {
   const [pass, setPass] = useState('');
   const locked = props.lockedUntil > Date.now();
@@ -91,7 +92,15 @@ export function UnlockVault(props: {
             und trotzdem nicht reichen.
           </div>
         )}
-        {props.fails > 0 && !locked && !props.deviceMismatch && (
+        {props.kdfError && (
+          <div className="gate-err">
+            ⚠ Schlüsselableitung fehlgeschlagen — vermutlich zu wenig
+            Arbeitsspeicher auf diesem Gerät. Kein Hinweis auf eine falsche
+            Passphrase; einfach erneut versuchen oder andere Anwendungen
+            schließen.
+          </div>
+        )}
+        {props.fails > 0 && !locked && !props.deviceMismatch && !props.kdfError && (
           <div className="gate-err">✖ Falsche Passphrase ({props.fails}/5 Fehlversuche)</div>
         )}
         {locked && (

@@ -63,6 +63,7 @@ async function registerDevice(userId: string, deviceId: string, deviceName: stri
   ws.send(JSON.stringify({
     type: 'hello', userId, deviceId, deviceName,
     edPub: b64enc(id.pub), xPub: b64enc(id.pub), prekeyPub: b64enc(id.pub), pqPrekeyPub: b64enc(id.pub),
+    prekeySig: b64enc(ed25519.sign(id.pub, id.priv)), pqPrekeySig: b64enc(ed25519.sign(id.pub, id.priv)),
   }));
   const challenge = await onceMsg(ws, (m) => m.type === 'challenge');
   const sig = ed25519.sign(b64dec(challenge.nonce), id.priv);
@@ -211,6 +212,19 @@ describe('Relay — Multi-Device-Vertrauensmodell (P0-Regressionstests)', () => 
 
     ws1.close(); ws2.close(); requester.close();
   });
+
+  it('lookup gibt die vom Gerät hinterlegten Prekey-Signaturen unverändert weiter (PREKEY-SIG-Transport)', async () => {
+    const userId = `user-${uid()}`;
+    const { ws: ws1 } = await registerDevice(userId, 'dev-1', 'Echtes Geraet');
+    const { ws: requester } = await registerDevice(`user-${uid()}`, 'dev-r', 'Anfragendes Geraet');
+
+    requester.send(JSON.stringify({ type: 'lookup', userId, ref: 'r2' }));
+    const res = await onceMsg(requester, (m) => m.type === 'lookup-result');
+    expect(typeof res.prekeySig).toBe('string');
+    expect(typeof res.pqPrekeySig).toBe('string');
+
+    ws1.close(); requester.close();
+  });
 });
 
 describe('Relay — bounded storage (Phantom-Konten / Warteschlangen-TTL)', () => {
@@ -245,4 +259,24 @@ describe('Relay — bounded storage (Phantom-Konten / Warteschlangen-TTL)', () =
     expect(u!.queue.length).toBe(1);
     users.delete(id);
   });
+});
+
+describe('Relay — User-Enumeration-Schutz (RELAY-ENUM)', () => {
+  it('begrenzt auch normale (nicht-Handshake) Lookups pro Konto', async () => {
+    const { ws } = await registerDevice(`user-${uid()}`, 'dev-1', 'x');
+    const target = `user-${uid()}`;
+
+    let rateLimitError: string | null = null;
+    for (let i = 0; i < 65; i++) {
+      ws.send(JSON.stringify({ type: 'lookup', userId: target, ref: `r${i}` }));
+      const res = await onceMsg(ws, (m) => m.type === 'lookup-result' || m.type === 'error');
+      if (res.type === 'error') { rateLimitError = res.error; break; }
+      // Bleibt unter dem generischen Pro-Socket-Nachrichtenlimit (30/s), damit
+      // gezielt das lookup-spezifische Limit (60/5min) getestet wird.
+      await new Promise((r) => setTimeout(r, 40));
+    }
+
+    expect(rateLimitError).toBe('lookup-rate-limited');
+    ws.close();
+  }, 10000);
 });

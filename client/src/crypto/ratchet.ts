@@ -121,7 +121,17 @@ export class Ratchet {
     };
   }
 
+  // Sanity-Checks gegen einen intern inkonsistenten Snapshot (z. B. durch
+  // einen Programmierfehler an anderer Stelle) — schützt nicht vor gezielter
+  // externer Manipulation (die faengt bereits die Vault-HMAC-Prüfung ab,
+  // bevor ein Snapshot hier ankommt), sondern vor stillschweigend
+  // übernommenen, unsinnigen Zählerständen.
   static fromSnapshot(s: RatchetSnapshot): Ratchet {
+    const nonNeg = (n: number, name: string): void => {
+      if (!Number.isInteger(n) || n < 0) throw new Error(`Ungültiger Ratchet-Snapshot: ${name}=${n}`);
+    };
+    nonNeg(s.ns, 'ns'); nonNeg(s.nr, 'nr'); nonNeg(s.pn, 'pn');
+
     const r = new Ratchet(b64.dec(s.rk), { priv: b64.dec(s.dhsPriv), pub: b64.dec(s.dhsPub) });
     r.state.dhr = s.dhr ? b64.dec(s.dhr) : null;
     r.state.cks = s.cks ? b64.dec(s.cks) : null;

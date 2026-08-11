@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { b64, newEd25519, newX25519, utf8 } from '../crypto/primitives';
+import { b64, edSign, newEd25519, newX25519, utf8 } from '../crypto/primitives';
 import { newPqKeyPair } from '../crypto/pq';
 import { safetyNumber, shortFingerprint } from '../crypto/safety';
 import {
-  checkIntegrity, createVault, demoTamperVault, destroyVault, hasDuressPin,
+  changePassphrase, checkIntegrity, createVault, demoTamperVault, destroyVault, hasDuressPin,
   lockVault, saveVault, unlockVault, vaultExists,
 } from '../crypto/vault';
 import {
@@ -94,6 +94,7 @@ export default function App() {
   const [fails, setFails] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [deviceMismatch, setDeviceMismatch] = useState(false);
+  const [kdfError, setKdfError] = useState(false);
   const pendingEvents = useRef<SecEvent[]>([]);
 
   const [relayStatus, setRelayStatus] = useState<RelayStatus>('offline');
@@ -207,19 +208,27 @@ export default function App() {
     });
   }, []);
 
+  // Persistiert Ratchet-/Gruppenschlüssel-Fortschritt sofort statt auf das
+  // 400ms-Debounce der generischen setData-Persistierung zu warten. Ohne das
+  // könnte ein Absturz zwischen einer bereits verschickten/verarbeiteten
+  // Nachricht und der verzögerten Speicherung dazu führen, dass nach einem
+  // Neustart ein bereits benutzter Message-Key erneut verwendet wird (siehe
+  // SECURITY_AUDIT.md, Fund RATCHET-A).
   const persistRealSessions = useCallback(() => {
     setData((d) => {
       if (!d) return d;
       const prevInit: Record<string, boolean> = {};
       for (const [id, s] of Object.entries(d.sessions)) prevInit[id] = s.initiator;
-      return {
+      const next = {
         ...d,
         sessions: realChat.snapshotSessions(prevInit),
         groupKeys: realChat.snapshotGroupKeys(),
         oneTimePrekeys: realChat.snapshotOneTimePrekeys(),
       };
+      if (!duress) void saveVault(next);
+      return next;
     });
-  }, []);
+  }, [duress]);
 
   const topUpAndPublishOtpks = useCallback(() => {
     const created = realChat.topUpOneTimePrekeys();
@@ -257,6 +266,11 @@ export default function App() {
       let payload: { groupId: string; groupName: string; epoch: number; key: string; members: Member[] };
       try { payload = JSON.parse(utf8.dec(plaintext)); } catch { return; }
       const fp = realChat.applyGroupKey(payload.groupId, payload.key, payload.epoch);
+      if (fp === null) {
+        log(ev('alert', 'GROUP_KEY_REPLAY',
+          `Veralteter Gruppenschlüssel für „${payload.groupName}" (Epoche ${payload.epoch}) verworfen — möglicher Replay-Versuch`));
+        return;
+      }
       setData((cur) => {
         if (!cur) return cur;
         const exists = cur.chats.find((c) => c.id === payload.groupId);
@@ -303,6 +317,7 @@ export default function App() {
         const contact: Contact = {
           userId: from, name, edPub: info?.edPub ?? '', xPub: info?.xPub ?? '',
           prekeyPub: info?.prekeyPub ?? '', pqPrekeyPub: info?.pqPrekeyPub ?? '',
+          prekeySig: info?.prekeySig ?? undefined, pqPrekeySig: info?.pqPrekeySig ?? undefined,
           addedAt: Date.now(), verified: false,
           online: true, lastSeen: envelope.ts || Date.now(),
         };
@@ -672,6 +687,8 @@ export default function App() {
         edPriv: b64.enc(e.priv), edPub: b64.enc(e.pub),
         prekeyPriv: b64.enc(prekey.priv), prekeyPub: b64.enc(prekey.pub),
         pqPrekeyPriv: b64.enc(pqPrekey.secretKey), pqPrekeyPub: b64.enc(pqPrekey.publicKey),
+        prekeySig: b64.enc(edSign(prekey.pub, e.priv)),
+        pqPrekeySig: b64.enc(edSign(pqPrekey.publicKey, e.priv)),
         deviceId: uid('dev-'), deviceName: 'Desktop (dieses Gerät)',
       };
       realChat.hydrate({}, {});
@@ -698,13 +715,14 @@ export default function App() {
     if (lockedUntil > Date.now()) return;
     setBusy(true);
     setDeviceMismatch(false);
+    setKdfError(false);
     try {
       const res = await unlockVault<VaultData>(passphrase);
       if (res.ok && res.duress) {
         const fakeIdentity: Identity = {
           userId: 'RV-0000-0000', displayName: 'Operator',
           xPriv: '', xPub: '', edPriv: '', edPub: '', prekeyPriv: '', prekeyPub: '',
-          pqPrekeyPriv: '', pqPrekeyPub: '',
+          pqPrekeyPriv: '', pqPrekeyPub: '', prekeySig: '', pqPrekeySig: '',
           deviceId: 'dev-0', deviceName: 'Desktop',
         };
         realChat.hydrate({}, {});
@@ -741,6 +759,17 @@ export default function App() {
             ev('info', 'KEY_ROTATION', 'Demo-Sitzungsschlüssel neu etabliert (echte Kontakte/Gruppen unverändert fortgesetzt)'),
           ],
         };
+        // Migration für Tresore von vor der Prekey-Signatur-Bindung
+        // (PREKEY-SIG): edPriv ist bereits vorhanden, die Signaturen lassen
+        // sich also lokal nachtragen, ohne die Identität neu zu erzeugen.
+        if (!merged.identity.prekeySig || !merged.identity.pqPrekeySig) {
+          const edPriv = b64.dec(merged.identity.edPriv);
+          merged.identity = {
+            ...merged.identity,
+            prekeySig: b64.enc(edSign(b64.dec(merged.identity.prekeyPub), edPriv)),
+            pqPrekeySig: b64.enc(edSign(b64.dec(merged.identity.pqPrekeyPub), edPriv)),
+          };
+        }
         pendingEvents.current = [];
         setData(merged);
         setDuress(false);
@@ -755,6 +784,14 @@ export default function App() {
       if (res.reason === 'device-mismatch') {
         setDeviceMismatch(true);
         pendingEvents.current.push(ev('warn', 'DEVICE_MISMATCH', 'Tresor ist an dieses Gerät/Windows-Konto gebunden (DPAPI) — auf einem anderen Gerät nicht entsperrbar, auch mit korrekter Passphrase.'));
+        return;
+      }
+      if (res.reason === 'kdf-error') {
+        // Kein Passphrasen-Problem (Argon2id-Ausführung selbst ist
+        // fehlgeschlagen, z. B. zu wenig Arbeitsspeicher) — zählt bewusst
+        // nicht als Fehlversuch, analog zu device-mismatch oben.
+        setKdfError(true);
+        pendingEvents.current.push(ev('warn', 'KDF_ERROR', 'Schlüsselableitung (Argon2id) fehlgeschlagen — vermutlich zu wenig Arbeitsspeicher auf diesem Gerät.'));
         return;
       }
       const n = fails + 1;
@@ -793,9 +830,15 @@ export default function App() {
       const name = nameInput || targetId;
       const contact: Contact = {
         userId: targetId, name, edPub: res.edPub ?? '', xPub: res.xPub, prekeyPub: res.prekeyPub,
-        pqPrekeyPub: res.pqPrekeyPub, addedAt: Date.now(), verified: false,
+        pqPrekeyPub: res.pqPrekeyPub, prekeySig: res.prekeySig ?? undefined, pqPrekeySig: res.pqPrekeySig ?? undefined,
+        addedAt: Date.now(), verified: false,
       };
-      realChat.beginSession(data.identity, contact, res.otpk ?? undefined);
+      try {
+        realChat.beginSession(data.identity, contact, res.otpk ?? undefined);
+      } catch {
+        setContactError('Schlüssel-Signatur dieses Kontakts ungültig — Kontakt wurde nicht hinzugefügt (möglicher Relay-Manipulationsversuch).');
+        return;
+      }
       const sn = safetyNumber(b64.dec(data.identity.xPub), b64.dec(contact.xPub));
       const fp = shortFingerprint(b64.dec(contact.xPub));
       const chat: Chat = {
@@ -1375,7 +1418,7 @@ export default function App() {
         <UnlockVault
           onUnlock={handleUnlock} busy={busy} fails={fails}
           lockedUntil={lockedUntil} alarm={alarm.active} onReset={destroyAll}
-          deviceMismatch={deviceMismatch}
+          deviceMismatch={deviceMismatch} kdfError={kdfError}
         />
         <AlarmOverlay alarm={alarm} onAck={ackAlarm} onLock={() => setAlarm(NO_ALARM)} />
       </>
@@ -1605,6 +1648,11 @@ export default function App() {
             onCheckIntegrity={runIntegrityCheck}
             onRotateAll={() => {
               chats.filter((c) => c.kind !== 'direct').forEach((c) => rotateChatAny(c.id, 'Manuelle Rotation'));
+            }}
+            onChangePassphrase={async (oldPass, newPass) => {
+              const res = await changePassphrase(oldPass, newPass);
+              if (res.ok) log(ev('info', 'PASSPHRASE_CHANGED', 'Vault-Passphrase geändert'));
+              return res;
             }}
           />
         )}
