@@ -31,7 +31,7 @@
     "@vitejs/plugin-react": "4.7.0",
     "fast-check": "4.9.0",
     "typescript": "5.9.3",
-    "vite": "5.4.21",
+    "vite": "8.2.1",
     "vitest": "4.1.10"
   }
 }
