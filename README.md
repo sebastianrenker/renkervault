@@ -287,6 +287,23 @@ nutzt zusätzlich `@noble/post-quantum` (ML-KEM-768) für Quantensicherheit —
 ebenfalls eine auditierte Bibliothek, keine eigene PQ-Implementierung.
 Vollständige Liste der Grenzen: [SECURITY.md](SECURITY.md).
 
+## RENKER-Plattform
+
+RenkerVault ist die **SECURE**-Säule der Renker-Plattform — Infrastruktur für
+vertrauenswürdige, autonome KI-Systeme. Gesamtarchitektur und die anderen
+Säulen: [RENKER_PLATFORM.md](RENKER_PLATFORM.md).
+
+```text
+RENKER — ACT (Rencora) · LEARN (Continuum) · SECURE (RenkerVault)
+                         gemeinsames Fundament: renker-core
+```
+
+| Säule | Rolle | Repo |
+| --- | --- | --- |
+| Rencora | ACT | https://github.com/sebastianrenker/rencora |
+| Continuum | LEARN | https://github.com/sebastianrenker/continuum |
+| renker-core-authz | öffentlicher Authorization-Core | https://github.com/sebastianrenker/renker-core-authz |
+
 ## Über dieses Projekt
 
 Ich bin 18 und habe RenkerVault als persönliches Lernprojekt gebaut, um
