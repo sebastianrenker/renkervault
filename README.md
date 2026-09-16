@@ -5,7 +5,7 @@
 ![CI](https://github.com/sebastianrenker/renkervault/actions/workflows/security-ci.yml/badge.svg)
 ![Status](https://img.shields.io/badge/status-Prototyp%20%2F%20MVP-orange)
 
-> Ende-zu-Ende-verschlüsselter Chat-Prototyp mit Zero-Knowledge-Relay, Post-Quantum-Handshake und Einbruchsalarm — Privatsphäre durch Architektur, nicht durch Vertrauen.
+> Ende-zu-Ende-verschlüsselter Chat-Prototyp mit chiffretext-blindem Relay, Post-Quantum-Hybrid-Handshake und Einbruchsalarm — Privatsphäre durch Architektur, nicht durch Vertrauen.
 
 ## Überblick
 
@@ -25,8 +25,9 @@ Relay-Servers hat **zu keinem Zeitpunkt Klartextzugriff** auf Nachrichten.
 verpflichtend machen — auch für E2E-verschlüsselte Dienste, technisch nur über
 **Client-Side-Scanning** vor der Verschlüsselung. RenkerVaults Architektur ist
 bewusst so gebaut, dass ein solcher Zugriffspunkt **nicht existiert**: der
-Relay-Server ist strukturell „blind" (Zero-Knowledge), es gibt keine Cloud-KI-
-Klassifikatoren, und serverseitig gibt es nichts auszuwerten. Damit reiht sich
+Relay-Server ist strukturell „blind" (sieht nur Chiffretext, nie Klartext), es
+gibt keine Cloud-KI-Klassifikatoren, und serverseitig gibt es **am Nachrichten-
+inhalt** nichts auszuwerten. Damit reiht sich
 das Projekt bei datenschutzfreundlichen Alternativen (Signal, Session, Threema)
 zur anlasslosen Massenüberwachung ein — nicht als Werkzeug „gegen" Kinderschutz.
 
@@ -67,14 +68,18 @@ renkervault/
 │       ├── net/             WebSocket-Client + Echt-Sitzungs-/Gruppenschlüssel-Engine
 │       ├── demo/seed.ts     Demo-Welt: simulierte Peers mit ECHTER Krypto
 │       └── ui/              HUD-Dashboard-Komponenten
-├── server/                  Zero-Knowledge-Relay (Node + ws): routet nur Chiffretext
+├── server/                  Chiffretext-blindes Relay (Node + ws): routet nur Chiffretext
 ├── deploy/                  Hosting: Caddyfile, systemd-Unit, DEPLOYMENT.md, torrc.snippet
 └── installer/               Windows-Installer (Inno Setup)
 ```
 
-**Zero-Knowledge-Prinzip:** Der Relay kennt nur Konto-IDs, öffentliche Schlüssel,
-Geräte-Metadaten und opake Envelopes. Authentifizierung läuft **passwortlos** per
-Ed25519-Challenge-Response — die Passphrase verlässt den Client nie.
+**Blind-Relay-Prinzip (und seine Grenze, ehrlich):** Der Relay sieht **nie
+Klartext** — nur opake Envelopes. Er kennt aber sehr wohl **Metadaten**: Konto-IDs,
+öffentliche Schlüssel, Geräte-Metadaten sowie Verbindungs-/Zeitpunkt-Muster (wer
+wann mit wem Kontakt hat). Das ist deshalb **kein „Zero-Knowledge"-System** im
+kryptografischen Sinn (es gibt keine Zero-Knowledge-Beweise) — es ist ein
+inhaltsblindes, metadaten-minimierendes Relay. Authentifizierung läuft
+**passwortlos** per Ed25519-Challenge-Response — die Passphrase verlässt den Client nie.
 
 **Wichtiger Kryptografie-Hinweis (ehrlich):** Es wird **keine eigene Primitive-
 Kryptografie** implementiert — nur auditierte Bibliotheken (`@noble/*`, `hash-wasm`,
@@ -94,7 +99,7 @@ Code-Signing, ehrlich benannt in [SECURITY.md](SECURITY.md).)
 **Für Entwickler (macOS/Linux/Android/Anpassungen, Node.js ≥ 18):**
 
 ```bash
-cd server && npm install && npm start      # Zero-Knowledge-Relay, Port 8787
+cd server && npm install && npm start      # Chiffretext-blindes Relay, Port 8787
 cd client && npm install && npm run dev     # Vite-Dev-Server, Port 5173
 ```
 
