@@ -29,7 +29,7 @@ zwingend passieren müsste.
 | Gruppen | ⚠️ E2E, aber strukturell schwächer als 1:1 | Zufälliger 256-Bit-Gruppenschlüssel pro Epoche; jede Mitgliederänderung erzeugt verifiziert eine neue Epoche (Entfernte lesen nichts Späteres). **Ehrliche Grenze (Audit 10.08.2026):** kein Forward-Secrecy-Schutz *innerhalb* einer Epoche (ein kompromittierter Epoch-Key entschlüsselt alle Nachrichten der Epoche rückwirkend) und keine kryptographische Absender-Authentifizierung zwischen Mitgliedern. Für kleine, gegenseitig vertrauende Gruppen geeignet, nicht für Szenarien mit potenziell böswilligen Mitgliedern. Details + Migrationsempfehlung (Sender-Keys/MLS): [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/FINDINGS.md](docs/FINDINGS.md) FINDING-010. |
 | Kanäle | ⚠ Verschlüsselt, aber schwächeres Vertrauensmodell | Kanal-Epoch-Key; Owner/Admins senden. Der Sender kennt zwangsläufig die Abonnentenliste; bei großen Kanälen ist der Schlüssel breit verteilt — eher „verschlüsselter Broadcast" als vertrauliche Kommunikation. |
 | Lokale Datenbank | ✅ At-Rest | Argon2id (Passphrase) → KEK → wrappt zufälligen Master-Key → AES-256-GCM über den gesamten Zustand. HMAC-SHA256 über den Ciphertext als Manipulationsschutz. Kein Klartext auf der Platte. |
-| Relay-Server | ✅ Zero-Knowledge | Sieht nur: Konto-IDs, öffentliche Schlüssel, Geräte-Metadaten, opake Envelopes. Auth per Ed25519-Challenge-Response (passwortlos). |
+| Relay-Server | ✅ Inhaltsblind (kein Klartext) — **kein** Zero-Knowledge | Sieht nie Klartext, aber sehr wohl Metadaten: Konto-IDs, öffentliche Schlüssel, Geräte-Metadaten, Verbindungs-/Zeitmuster, opake Envelopes. Auth per Ed25519-Challenge-Response (passwortlos). |
 
 ## 2. Einbruchsalarm-System (Kernfeature)
 
