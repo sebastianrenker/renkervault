@@ -7,7 +7,7 @@ export function padToTier(plaintext: Uint8Array): Uint8Array {
   const tier = PAD_TIERS.find((t) => t >= needed);
   if (tier === undefined) {
     throw new Error(
-      `Nutzlast zu groß zum Padden (${plaintext.length} Byte, größte Stufe ${PAD_TIERS[PAD_TIERS.length - 1]} Byte)`
+      `payload too large to pad (${plaintext.length} bytes, largest tier ${PAD_TIERS[PAD_TIERS.length - 1]} bytes)`
     );
   }
   const out = new Uint8Array(tier);
@@ -20,7 +20,7 @@ export function unpadFromTier(padded: Uint8Array): Uint8Array {
   let i = padded.length - 1;
   while (i >= 0 && padded[i] === 0x00) i--;
   if (i < 0 || padded[i] !== 0x80) {
-    throw new Error('Padding ungültig — Daten beschädigt oder nicht gepolstert');
+    throw new Error('invalid padding — data corrupted or not padded');
   }
   return padded.subarray(0, i);
 }

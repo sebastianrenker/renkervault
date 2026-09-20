@@ -122,22 +122,22 @@ export class RealChatEngine {
     this.sessionTags.delete(peerId);
   }
 
-  // Prueft, dass Prekey und PQ-Prekey nachweisbar vom Identitaetsschluessel
-  // dieses Kontakts signiert wurden (klassisches X3DH-Element), statt sie
-  // vom Relay-Lookup ungeprueft zu uebernehmen — ein manipulierender Relay
-  // koennte sonst bei der Erstkontakt-Anfrage einen eigenen Prekey
-  // unterschieben (siehe SECURITY_AUDIT.md, PREKEY-SIG). Wirft, wenn keine
-  // gueltige Signatur vorliegt — der Aufrufer muss das als Fehlschlag
-  // behandeln, nicht stillschweigend fortfahren.
+  // Checks that the prekey and PQ prekey were demonstrably signed by this
+  // contact's identity key (a classical X3DH element), instead of adopting
+  // them unchecked from the relay lookup — a manipulating relay
+  // could otherwise slip in its own prekey on the first-contact request
+  // (see SECURITY_AUDIT.md, PREKEY-SIG). Throws when no
+  // valid signature is present — the caller must treat that as a failure,
+  // not silently proceed.
   private verifyPrekeyBinding(contact: Contact): void {
     if (!contact.edPub || !contact.prekeySig || !contact.pqPrekeySig) {
-      throw new Error('Prekey-Signatur fehlt — Kontakt kann nicht vertrauenswürdig kontaktiert werden');
+      throw new Error('prekey signature missing — contact cannot be contacted trustworthily');
     }
     const edPub = b64.dec(contact.edPub);
     const prekeyOk = edVerify(b64.dec(contact.prekeySig), b64.dec(contact.prekeyPub), edPub);
     const pqPrekeyOk = edVerify(b64.dec(contact.pqPrekeySig), b64.dec(contact.pqPrekeyPub), edPub);
     if (!prekeyOk || !pqPrekeyOk) {
-      throw new Error('Prekey-Signatur ungültig — möglicher Substitutionsversuch durch den Relay');
+      throw new Error('prekey signature invalid — possible substitution attempt by the relay');
     }
   }
 
@@ -160,7 +160,7 @@ export class RealChatEngine {
   }
 
   async acceptFirstMessage(myIdentity: Identity, peerUserId: string, envelope: Envelope): Promise<Uint8Array> {
-    if (!envelope.x3dh || !envelope.header) throw new Error('Kein gültiger Erstkontakt-Envelope');
+    if (!envelope.x3dh || !envelope.header) throw new Error('not a valid first-contact envelope');
     const myX: KeyPair = { priv: b64.dec(myIdentity.xPriv), pub: b64.dec(myIdentity.xPub) };
     const myPrekey: KeyPair = { priv: b64.dec(myIdentity.prekeyPriv), pub: b64.dec(myIdentity.prekeyPub) };
     const myPqPrekeySecret = b64.dec(myIdentity.pqPrekeyPriv);
@@ -186,7 +186,7 @@ export class RealChatEngine {
     tag?: string;
   }> {
     const ratchet = this.ratchets.get(peerUserId);
-    if (!ratchet) throw new Error('Keine Sitzung mit diesem Kontakt');
+    if (!ratchet) throw new Error('no session with this contact');
     const enc = await ratchet.encrypt(padToTier(plaintext));
     const pending = this.pendingHandshake.get(peerUserId);
     if (pending) this.pendingHandshake.delete(peerUserId);
@@ -201,7 +201,7 @@ export class RealChatEngine {
 
   async decryptDirect(peerUserId: string, envelope: Envelope): Promise<Uint8Array> {
     const ratchet = this.ratchets.get(peerUserId);
-    if (!ratchet || !envelope.header) throw new Error('Keine Sitzung mit diesem Kontakt');
+    if (!ratchet || !envelope.header) throw new Error('no session with this contact');
     return unpadFromTier(await ratchet.decrypt({ header: envelope.header, ct: envelope.ct }));
   }
 
@@ -224,11 +224,11 @@ export class RealChatEngine {
     return { epoch, fp: groupFingerprint(key, epoch) };
   }
 
-  // Lehnt eine group-key-Nachricht ab, deren Epoche nicht strikt größer als
-  // die zuletzt bekannte ist. Ohne diese Prüfung könnte eine erneut
-  // zugestellte (replayte) alte group-key-Nachricht einen bereits rotierten
-  // — potenziell kompromittierten — Gruppenschlüssel wieder aktivieren und
-  // damit die Post-Compromise-Security der Epochen-Rotation aushebeln.
+  // Rejects a group-key message whose epoch is not strictly greater than
+  // the last known one. Without this check, a re-delivered
+  // (replayed) old group-key message could reactivate an already-rotated
+  // — potentially compromised — group key and
+  // thereby defeat the post-compromise security of the epoch rotation.
   applyGroupKey(chatId: string, keyB64: string, epoch: number): string | null {
     const existing = this.groupKeys.get(chatId);
     if (existing && epoch <= existing.epoch) return null;
@@ -244,14 +244,14 @@ export class RealChatEngine {
 
   async encryptGroup(chatId: string, plaintext: Uint8Array): Promise<{ ct: string; epoch: number }> {
     const g = this.groupKeys.get(chatId);
-    if (!g) throw new Error('Kein Gruppenschlüssel');
+    if (!g) throw new Error('no group key');
     const ct = await aesGcmEncrypt(g.key, padToTier(plaintext));
     return { ct: b64.enc(ct), epoch: g.epoch };
   }
 
   async decryptGroup(chatId: string, ct: string): Promise<Uint8Array> {
     const g = this.groupKeys.get(chatId);
-    if (!g) throw new Error('Kein Gruppenschlüssel für diese Gruppe');
+    if (!g) throw new Error('no group key for this group');
     return unpadFromTier(await aesGcmDecrypt(g.key, b64.dec(ct)));
   }
 }

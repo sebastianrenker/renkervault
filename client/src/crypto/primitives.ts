@@ -90,13 +90,13 @@ export async function aesGcmDecrypt(
 
 export const ARGON2 = { iterations: 4, memorySizeKiB: 64 * 1024, parallelism: 1 };
 
-// Eigene Fehlerklasse, damit Aufrufer einen echten Argon2id-Ausführungsfehler
-// (z. B. zu wenig Speicher für 64 MiB auf sehr begrenzter Hardware) von einem
-// falschen Passwort unterscheiden können, statt beides als "falsches
-// Passwort" misszudeuten.
+// A dedicated error class so that callers can distinguish a real Argon2id
+// execution error (e.g. not enough memory for 64 MiB on very limited hardware)
+// from a wrong password, instead of misinterpreting both as a "wrong
+// password".
 export class KdfExecutionError extends Error {
   constructor(cause: unknown) {
-    super('Argon2id-Ausführung fehlgeschlagen (z. B. zu wenig Arbeitsspeicher)');
+    super('Argon2id execution failed (e.g. not enough memory)');
     this.name = 'KdfExecutionError';
     this.cause = cause;
   }

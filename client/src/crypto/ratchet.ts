@@ -60,11 +60,11 @@ function cloneState(s: RatchetState): RatchetState {
   };
 }
 
-// Operiert auf einem Entwurf (draft), niemals direkt auf dem committeten State —
-// Aufrufer (decrypt) verwirft den draft bei Fehlschlag, statt ihn zu übernehmen.
+// Operates on a draft, never directly on the committed state —
+// the caller (decrypt) discards the draft on failure instead of adopting it.
 function skipMessageKeysInto(state: RatchetState, until: number): void {
   if (!state.ckr) return;
-  if (state.nr + MAX_SKIP < until) throw new Error('Zu viele übersprungene Nachrichten');
+  if (state.nr + MAX_SKIP < until) throw new Error('too many skipped messages');
   while (state.nr < until) {
     const [next, mk] = kdfCk(state.ckr);
     state.ckr = next;
@@ -89,10 +89,10 @@ function dhRatchetInto(state: RatchetState, theirDh: Uint8Array): void {
 
 export class Ratchet {
   private state: RatchetState;
-  // Serialisiert encrypt()/decrypt() auf dieser Instanz. Ohne das würden
-  // überlappende Aufrufe (z. B. paralleles Senden, oder ein Send während ein
-  // Deliver verarbeitet wird) denselben Kettenschlüssel doppelt lesen, bevor
-  // der erste Aufruf committet — Message-Key-Wiederverwendung.
+  // Serializes encrypt()/decrypt() on this instance. Without it,
+  // overlapping calls (e.g. parallel sending, or a send while a
+  // deliver is being processed) would read the same chain key twice before
+  // the first call commits — message-key reuse.
   private queue: Promise<unknown> = Promise.resolve();
 
   private constructor(rk: Uint8Array, dhs: KeyPair) {
@@ -121,14 +121,14 @@ export class Ratchet {
     };
   }
 
-  // Sanity-Checks gegen einen intern inkonsistenten Snapshot (z. B. durch
-  // einen Programmierfehler an anderer Stelle) — schützt nicht vor gezielter
-  // externer Manipulation (die faengt bereits die Vault-HMAC-Prüfung ab,
-  // bevor ein Snapshot hier ankommt), sondern vor stillschweigend
-  // übernommenen, unsinnigen Zählerständen.
+  // Sanity checks against an internally inconsistent snapshot (e.g. from
+  // a programming error elsewhere) — does not protect against targeted
+  // external manipulation (the vault HMAC check already catches that
+  // before a snapshot arrives here), but against silently
+  // adopted, nonsensical counter values.
   static fromSnapshot(s: RatchetSnapshot): Ratchet {
     const nonNeg = (n: number, name: string): void => {
-      if (!Number.isInteger(n) || n < 0) throw new Error(`Ungültiger Ratchet-Snapshot: ${name}=${n}`);
+      if (!Number.isInteger(n) || n < 0) throw new Error(`invalid ratchet snapshot: ${name}=${n}`);
     };
     nonNeg(s.ns, 'ns'); nonNeg(s.nr, 'nr'); nonNeg(s.pn, 'pn');
 
@@ -162,21 +162,21 @@ export class Ratchet {
 
   private async doEncrypt(plaintext: Uint8Array): Promise<RatchetMessage> {
     const s = this.state;
-    if (!s.cks) throw new Error('Sendekette nicht initialisiert');
+    if (!s.cks) throw new Error('sending chain not initialized');
     const [next, mk] = kdfCk(s.cks);
     const header: RatchetHeader = { dh: b64.enc(s.dhs.pub), pn: s.pn, n: s.ns };
     const aad = utf8.enc(JSON.stringify(header));
     const ct = await aesGcmEncrypt(mk, plaintext, aad);
-    // Sendekette erst nach erfolgreicher Verschlüsselung fortschreiben.
+    // Advance the sending chain only after successful encryption.
     s.cks = next;
     s.ns += 1;
     return { header, ct: b64.enc(ct) };
   }
 
-  // Entschlüsselt gegen einen Entwurf des States und committet ihn nur bei Erfolg.
-  // Verhindert, dass gefälschte/duplizierte/malformte Nachrichten (z. B. von einem
-  // böswilligen Relay) die Ratchet-Kette durch einen fehlgeschlagenen Zustandsübergang
-  // dauerhaft zerstören — siehe Signal-Spec RatchetDecrypt (state = deepcopy vor Versuch).
+  // Decrypts against a draft of the state and commits it only on success.
+  // Prevents forged/duplicated/malformed messages (e.g. from a
+  // malicious relay) from permanently destroying the ratchet chain through a failed
+  // state transition — see the Signal spec RatchetDecrypt (state = deepcopy before the attempt).
   private async doDecrypt(msg: RatchetMessage): Promise<Uint8Array> {
     const aad = utf8.enc(JSON.stringify(msg.header));
     const data = b64.dec(msg.ct);
@@ -197,7 +197,7 @@ export class Ratchet {
     }
 
     skipMessageKeysInto(draft, msg.header.n);
-    if (!draft.ckr) throw new Error('Empfangskette nicht initialisiert');
+    if (!draft.ckr) throw new Error('receiving chain not initialized');
     const [next, mk] = kdfCk(draft.ckr);
 
     const plaintext = await aesGcmDecrypt(mk, data, aad);

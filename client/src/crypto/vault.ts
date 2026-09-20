@@ -5,14 +5,14 @@ import {
 } from './primitives';
 
 const LS_KEY = 'renkervault.vault.v1';
-// Separater Schlüssel: haelt die hoechste je gesehene Generation fest, um ein
-// unbemerktes Zurueckspielen einer aelteren, aber weiterhin gueltig
-// signierten Vault-Version zu erkennen (Rollback-Schutz, siehe
-// SECURITY_AUDIT.md STORAGE-ROLLBACK). Schuetzt gezielt gegen das
-// Wiedereinspielen eines aelteren, isoliert exfiltrierten Vault-Snapshots —
-// nicht gegen ein Zuruecksetzen des GESAMTEN Storage-Ursprungs inkl. dieses
-// Zaehlers selbst (dagegen gibt es aus einer Web-/WebView-Laufzeit heraus
-// keinen technischen Schutz).
+// A separate key: keeps the highest generation ever seen, to detect an
+// unnoticed replay of an older but still validly
+// signed vault version (rollback protection, see
+// SECURITY_AUDIT.md STORAGE-ROLLBACK). Specifically protects against
+// re-injecting an older, isolatedly exfiltrated vault snapshot —
+// not against a reset of the ENTIRE storage origin incl. this
+// counter itself (against which there is no technical protection
+// from a web/WebView runtime).
 const GEN_KEY = 'renkervault.vault.gen.v1';
 
 interface VaultFile {
@@ -49,10 +49,10 @@ async function dpapiUnwrap(bytes: Uint8Array): Promise<Uint8Array> {
 
 let masterKey: Uint8Array | null = null;
 
-// Ueberschreibt den in JS sichtbaren Puffer vor dem Dereferenzieren. Kein Garant
-// gegen forensische Wiederherstellung (V8/WebCrypto koennen intern eigene Kopien
-// halten, die von JS aus nicht erreichbar sind), aber entfernt zuverlaessig die
-// laenglebigste, direkt referenzierte Kopie des Master-Keys aus dem Heap.
+// Overwrites the JS-visible buffer before dereferencing. No guarantee
+// against forensic recovery (V8/WebCrypto can hold internally their own copies
+// unreachable from JS), but reliably removes the
+// longest-lived, directly referenced copy of the master key from the heap.
 function zero(u: Uint8Array | null): void {
   if (u) u.fill(0);
 }
@@ -81,10 +81,10 @@ function macInput(ct: Uint8Array, generation: number): Uint8Array {
   return concat(ct, utf8.enc(String(generation)));
 }
 
-// Bestmoegliches Ueberschreiben vor dem Loeschen. Kein Garant gegen forensische
-// Wiederherstellung auf Storage-Engine-Ebene (LevelDB/SQLite-Backing von Browser
-// bzw. WebView kann durch Compaction weiterhin alte Kopien enthalten), aber
-// entfernt den unmittelbar ueber die localStorage-API sichtbaren Klartext-Slot.
+// Best-effort overwriting before deletion. No guarantee against forensic
+// recovery at the storage-engine level (the LevelDB/SQLite backing of the browser
+// or WebView can still contain old copies through compaction), but
+// removes the plaintext slot immediately visible via the localStorage API.
 function secureRemove(key: string): void {
   for (let i = 0; i < 3; i++) localStorage.setItem(key, b64.enc(rand(4096)));
   localStorage.removeItem(key);
@@ -125,7 +125,7 @@ export async function createVault<T>(
 }
 
 async function sealData<T>(data: T, generation: number): Promise<{ data: string; mac: string }> {
-  if (!masterKey) throw new Error('Vault ist gesperrt');
+  if (!masterKey) throw new Error('vault is locked');
   const ct = await aesGcmEncrypt(masterKey, utf8.enc(JSON.stringify(data)));
   const mac = hmacSha256(macKeyOf(masterKey), macInput(ct, generation));
   return { data: b64.enc(ct), mac: b64.enc(mac) };
@@ -145,12 +145,12 @@ export async function saveVault<T>(data: T): Promise<void> {
 
 export type ChangePassphraseResult = { ok: true } | { ok: false; reason: 'wrong-pass' | 'missing' | 'locked' };
 
-// Wrappt denselben Master-Key mit einem neu abgeleiteten KEK unter neuem
-// Salt — der Master-Key selbst (und damit alle bestehenden Ratchet-/
-// Gruppensitzungen) bleibt unverändert, nur die Passphrase, die ihn schützt,
-// wechselt. Verlangt bewusst die alte Passphrase, damit ein kurzzeitig
-// unbeaufsichtigt entsperrtes Gerät nicht durch bloßes Setzen einer neuen
-// Passphrase gekapert werden kann.
+// Wraps the same master key with a newly derived KEK under a new
+// salt — the master key itself (and thus all existing ratchet/
+// group sessions) stays unchanged, only the passphrase protecting it
+// changes. Deliberately requires the old passphrase, so that a briefly
+// unattended unlocked device cannot be hijacked by merely setting a new
+// passphrase.
 export async function changePassphrase(oldPassphrase: string, newPassphrase: string): Promise<ChangePassphraseResult> {
   if (!masterKey) return { ok: false, reason: 'locked' };
   const file = readFile();
@@ -185,11 +185,11 @@ export async function changePassphrase(oldPassphrase: string, newPassphrase: str
   return { ok: true };
 }
 
-// Öffentlicher Einstiegspunkt: fängt JEDE unerwartete Exception ab (z. B.
-// ungültiges Base64 in einem manipulierten/korrupten Feld, das atob() nicht
-// dekodieren kann) und behandelt sie als "tampered" statt sie ungefangen
-// durchzureichen. Von Fuzzing-Tests gefunden (fuzz-vault.test.ts) — eine
-// manipulierte Vault-Datei darf die App nie zum Absturz bringen.
+// The public entry point: catches EVERY unexpected exception (e.g.
+// invalid Base64 in a manipulated/corrupt field that atob() cannot
+// decode) and treats it as "tampered" instead of passing it through
+// uncaught. Found by fuzzing tests (fuzz-vault.test.ts) — a
+// manipulated vault file must never crash the app.
 export async function unlockVault<T>(passphrase: string): Promise<UnlockResult<T>> {
   try {
     return await unlockVaultInner<T>(passphrase);
@@ -237,12 +237,12 @@ async function unlockVaultInner<T>(passphrase: string): Promise<UnlockResult<T>>
 
   const ct = b64.dec(file.data);
   const mac = b64.dec(file.mac);
-  // Ältere Tresordateien (vor Einführung des Generation-Counters) haben kein
-  // `generation`-Feld — ihr MAC wurde ohne Generation im Input berechnet.
-  // Für diese wird hier zunächst nach dem alten Schema geprüft; nach
-  // erfolgreichem Entsperren wird die Datei unten transparent auf das neue
-  // Format migriert (generation=1, MAC neu berechnet), ohne dass der Nutzer
-  // etwas davon merkt.
+  // Older vault files (before the generation counter was introduced) have no
+  // `generation` field — their MAC was computed without a generation in the input.
+  // For these, the old scheme is checked first here; after a
+  // successful unlock, the file is transparently migrated below to the new
+  // format (generation=1, MAC recomputed), without the user
+  // noticing.
   const isLegacyFormat = file.generation === undefined;
   const expected = isLegacyFormat
     ? hmacSha256(macKeyOf(mk), ct)

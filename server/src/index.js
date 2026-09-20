@@ -11,12 +11,12 @@ const HOST = process.env.HOST || '0.0.0.0';
 const TLS_CERT_FILE = process.env.TLS_CERT_FILE || '';
 const TLS_KEY_FILE = process.env.TLS_KEY_FILE || '';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
-// Kommagetrennte Liste erlaubter Origins fuer Browser-Clients (z. B.
-// "https://chat.example.com"). Nativen Clients (Tauri/Android) fehlt der
-// Origin-Header meist ganz — die werden unabhaengig davon durchgelassen.
-// Leer/unset = keine Origin-Pruefung (Standardverhalten fuer lokale
-// Entwicklung, wo Web-Client und Relay bewusst auf unterschiedlichen
-// localhost-Ports laufen).
+// A comma-separated list of allowed origins for browser clients (e.g.
+// "https://chat.example.com"). Native clients (Tauri/Android) usually lack
+// the Origin header entirely — they are let through regardless.
+// Empty/unset = no origin check (the default behavior for local
+// development, where the web client and relay deliberately run on different
+// localhost ports).
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -41,20 +41,20 @@ const SEND_RATE_WINDOW_MS = 60 * 1000;
 const SEND_RATE_LIMIT = 300;
 const OTPK_LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
 const OTPK_LOOKUP_RATE_LIMIT = 20;
-// Deckt auch reine Info-Lookups (forHandshake=false) ab, damit
-// User-Enumeration ("welche userId existiert") nicht ueber diesen Pfad
-// beliebig beschleunigt werden kann — grosszuegiger als das strengere
-// OTPK-Lookup-Limit oben, da normale Lookups (Kontaktnamen auffrischen)
-// im normalen Betrieb haeufiger vorkommen.
+// Also covers pure info lookups (forHandshake=false), so that
+// user enumeration ("which userId exists") cannot be accelerated arbitrarily
+// via this path — more generous than the stricter
+// OTPK lookup limit above, since normal lookups (refreshing contact names)
+// occur more often in normal operation.
 const LOOKUP_RATE_WINDOW_MS = 5 * 60 * 1000;
 const LOOKUP_RATE_LIMIT = 60;
-// Begrenzt, wie viele Konten (echte + durch "send" an unbekannte Empfaenger
-// automatisch angelegte Phantom-Konten) der Prozess insgesamt im Speicher haelt —
-// ohne diese Grenze koennte ein authentifizierter Absender durch Nachrichten an
-// beliebig viele erfundene userIds unbegrenzt Speicher belegen.
+// Limits how many accounts (real + phantom accounts automatically created by
+// "send" to unknown recipients) the process holds in memory in total —
+// without this limit, an authenticated sender could occupy unbounded memory
+// through messages to arbitrarily many invented userIds.
 const MAX_TRACKED_USERS = 200_000;
-// Nach dieser Zeit verfallen ungelieferte Nachrichten in der Offline-Warteschlange
-// und werden beim naechsten Sweep entfernt (bounded storage statt ewigem Anwachsen).
+// After this time, undelivered messages in the offline queue expire
+// and are removed on the next sweep (bounded storage instead of eternal growth).
 const QUEUE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -83,9 +83,9 @@ function getUser(userId) {
   return u;
 }
 
-// Entfernt abgelaufene Warteschlangen-Eintraege und raeumt Konten auf, die nie ein
-// echtes Geraet registriert haben (z. B. durch "send" an erfundene Empfaenger
-// entstandene Phantom-Konten) und deren Warteschlange inzwischen leer ist.
+// Removes expired queue entries and cleans up accounts that never registered
+// a real device (e.g. phantom accounts created by "send" to invented recipients)
+// and whose queue is now empty.
 function sweep() {
   const t = now();
   for (const [userId, u] of users) {
@@ -111,10 +111,10 @@ function toUser(userId, msg, exceptWs = null) {
   }
 }
 
-// Wie toUser(), aber liefert nur an Geraete, die der Kontoinhaber bereits als
-// vertrauenswuerdig bestaetigt hat. Ein neues, noch nicht bestaetigtes Geraet kann
-// sich sonst einfach online halten und live jede eingehende Nachricht mitlesen,
-// ohne dass die Bestaetigung durch ein anderes Geraet je durchgesetzt wird.
+// Like toUser(), but delivers only to devices the account owner has already
+// confirmed as trusted. A new, not-yet-confirmed device could otherwise
+// simply stay online and read every incoming message live,
+// without the confirmation by another device ever being enforced.
 function toTrustedUser(userId, msg, u) {
   const data = JSON.stringify(msg);
   for (const [ws, meta] of sockets) {
@@ -147,13 +147,13 @@ function recordAuthFail(userId, deviceHint) {
   g.fails.push(t);
   securityEvent(userId, 'auth-fail', {
     attempts: g.fails.length,
-    device: deviceHint || 'unbekannt',
+    device: deviceHint || 'unknown',
   });
   if (g.fails.length >= FAIL_LIMIT) {
     g.lockedUntil = t + LOCKOUT_MS;
     g.fails = [];
     securityEvent(userId, 'lockout', { until: g.lockedUntil, seconds: LOCKOUT_MS / 1000 });
-    console.log(`[GUARD] Lockout fuer ${userId} (${FAIL_LIMIT} Fehlversuche)`);
+    console.log(`[GUARD] Lockout for ${userId} (${FAIL_LIMIT} failed attempts)`);
     return true;
   }
   return false;
@@ -173,8 +173,8 @@ const server = useTls
 
 function verifyClient(info, cb) {
   const origin = info.req.headers.origin;
-  // Kein Origin-Header (native Clients wie Tauri/Android senden meist
-  // keinen browser-typischen Origin) -> nicht pruefbar, durchlassen.
+  // No Origin header (native clients like Tauri/Android usually send
+  // no browser-typical origin) -> not checkable, let through.
   if (!origin || ALLOWED_ORIGINS.length === 0) return cb(true);
   if (ALLOWED_ORIGINS.includes(origin)) return cb(true);
   cb(false, 403, 'origin-not-allowed');
@@ -255,7 +255,7 @@ function handle(ws, meta, msg) {
       if (!existing) {
         u.devices.set(deviceId, {
           deviceId,
-          name: deviceName || 'Unbenanntes Geraet',
+          name: deviceName || 'Unnamed device',
           edPub,
           xPub,
           prekeyPub: prekeyPub || null,
@@ -268,8 +268,8 @@ function handle(ws, meta, msg) {
           lastSeen: now(),
         });
         if (!isFirstDevice) {
-          securityEvent(userId, 'new-device', { deviceId, name: deviceName || 'Unbenanntes Geraet' });
-          console.log(`[GUARD] Neues Geraet fuer ${userId}: ${deviceName} (wartet auf Bestaetigung)`);
+          securityEvent(userId, 'new-device', { deviceId, name: deviceName || 'Unnamed device' });
+          console.log(`[GUARD] New device for ${userId}: ${deviceName} (awaiting confirmation)`);
         }
       } else if (existing.edPub !== edPub) {
         securityEvent(userId, 'key-mismatch', { deviceId });
@@ -319,7 +319,7 @@ function handle(ws, meta, msg) {
 
     case 'report-unlock-fail': {
       if (!meta.userId) return;
-      recordAuthFail(meta.userId, msg.device || 'lokal');
+      recordAuthFail(meta.userId, msg.device || 'local');
       break;
     }
 
@@ -373,10 +373,10 @@ function handle(ws, meta, msg) {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
       const caller = u.devices.get(meta.deviceId);
-      // Nur ein bereits bestaetigtes Geraet darf weitere Geraete freischalten — sonst
-      // koennte sich ein selbst registriertes, nie bestaetigtes Geraet einfach selbst
-      // freischalten (deviceId ist dem Aufrufer immer bekannt) und den gesamten
-      // Bestaetigungsschritt vollstaendig umgehen.
+      // Only an already-confirmed device may approve further devices — otherwise
+      // a self-registered, never-confirmed device could simply self-
+      // approve (the deviceId is always known to the caller) and fully bypass the
+      // entire confirmation step.
       if (!caller || !caller.trusted) return send(ws, { type: 'error', error: 'not-trusted' });
       const d = u.devices.get(msg.deviceId);
       if (d) {
@@ -390,9 +390,9 @@ function handle(ws, meta, msg) {
       if (!meta.authed) return;
       const u = getUser(meta.userId);
       const caller = u.devices.get(meta.deviceId);
-      // Gleiche Begruendung wie bei approve-device: sonst koennte ein nicht
-      // bestaetigtes Geraet die echten, vertrauenswuerdigen Geraete des Kontos
-      // hinauswerfen (Account-Takeover / Denial-of-Service).
+      // Same rationale as for approve-device: otherwise a non-confirmed
+      // device could throw out the real, trusted devices of the account
+      // (account takeover / denial-of-service).
       if (!caller || !caller.trusted) return send(ws, { type: 'error', error: 'not-trusted' });
       if (u.devices.delete(msg.deviceId)) {
         for (const [sock, m] of sockets) {
@@ -412,9 +412,9 @@ function handle(ws, meta, msg) {
         return send(ws, { type: 'error', error: 'lookup-rate-limited', ref: msg.ref ?? null });
       }
       const target = users.get(msg.userId);
-      // Nur ein bereits bestaetigtes Geraet darf als Handshake-Bundle fuer neue
-      // Kontakte ausgeliefert werden — sonst koennte ein nicht bestaetigtes,
-      // rein selbst-registriertes Geraet neue Konversationen kapern.
+      // Only an already-confirmed device may be delivered as a handshake bundle for new
+      // contacts — otherwise a non-confirmed, purely self-registered
+      // device could hijack new conversations.
       const first = target ? [...target.devices.values()].find((d) => d.trusted) ?? null : null;
       let otpk = null;
       if (first && msg.forHandshake === true && first.otpks.size > 0) {
@@ -468,9 +468,9 @@ if (isMain) {
   server.listen(PORT, HOST, () => {
     const scheme = useTls ? 'wss' : 'ws';
     const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-    console.log(`RenkerVault Relay laeuft auf ${scheme}://${displayHost}:${PORT} (gebunden an ${HOST})`);
-    console.log(`TLS: ${useTls ? 'AKTIV (natives Zertifikat)' : 'AUS — nur fuer lokale Nutzung/Reverse-Proxy-Setup geeignet, siehe deploy/DEPLOYMENT.md'}`);
-    console.log('Zero-Knowledge-Modus: Server speichert ausschliesslich Chiffretext.');
+    console.log(`RenkerVault relay running on ${scheme}://${displayHost}:${PORT} (bound to ${HOST})`);
+    console.log(`TLS: ${useTls ? 'ON (native certificate)' : 'OFF — only suitable for local use/reverse-proxy setup, see deploy/DEPLOYMENT.md'}`);
+    console.log('Content-blind mode: the server stores ciphertext only.');
   });
 }
 

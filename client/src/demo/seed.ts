@@ -23,22 +23,22 @@ const symKeys = new Map<string, SymState>();
 
 const REPLY_POOLS: Record<string, string[]> = {
   nadja: [
-    'Klingt gut. Ich prüfe das und melde mich verschlüsselt zurück.',
-    'Safety Number habe ich eben verglichen — stimmt überein. ✔',
-    'Ok. Denk dran: nichts davon über unverschlüsselte Kanäle.',
-    'Erledigt. Log liegt im Tresor.',
+    'Sounds good. I will check it and reply encrypted.',
+    'I just compared the safety number — it matches. ✔',
+    'Ok. Remember: none of this over unencrypted channels.',
+    'Done. The log is in the vault.',
   ],
   milan: [
-    'Verstanden. Schlüsselrotation ist bei mir auch durchgelaufen.',
-    'Kann ich dir morgen als verschlüsselten Anhang schicken.',
-    'Gute Idee. Lass uns das im Gruppenkanal abstimmen.',
-    'Alles ruhig hier, keine Auffälligkeiten im Security-Log.',
+    'Understood. The key rotation went through on my end too.',
+    'I can send it to you tomorrow as an encrypted attachment.',
+    'Good idea. Let us coordinate that in the group channel.',
+    'All quiet here, nothing unusual in the security log.',
   ],
   brandt: [
-    'Danke für die Info. Diskretion wie immer.',
-    'Die Unterlagen kommen nur über diesen Kanal, versprochen.',
-    'Einverstanden. Timer für verschwindende Nachrichten bitte anlassen.',
-    'Bestätigt.',
+    'Thanks for the info. Discretion as always.',
+    'The documents come only over this channel, promised.',
+    'Agreed. Please keep the disappearing-messages timer on.',
+    'Confirmed.',
   ],
 };
 
@@ -57,7 +57,7 @@ async function makePeer(id: string, name: string, myIdentity: KeyPair, stored?: 
 
   const sim: PeerSim = {
     id, name, identity: peerIdentity, ratchet: theirs,
-    replies: REPLY_POOLS[id] ?? ['Verstanden.'], replyIdx: 0,
+    replies: REPLY_POOLS[id] ?? ['Understood.'], replyIdx: 0,
   };
   peers.set(id, sim);
   myRatchets.set(id, mine);
@@ -116,30 +116,30 @@ export async function buildDemoWorld(identity: Identity): Promise<{
 
   const directDefs: { peer: PeerSim; sub: string; script: [boolean, string, number][] }[] = [
     {
-      peer: nadja, sub: 'zuletzt aktiv vor 4 min',
+      peer: nadja, sub: 'last active 4 min ago',
       script: [
-        [false, 'Hey — bist du auf dem neuen sicheren Kanal?', 95],
-        [true, 'Ja, RenkerVault läuft. Safety Number vergleichen wir gleich.', 92],
-        [false, 'Perfekt. Die alten Messenger nutze ich dafür nicht mehr.', 90],
-        [true, 'Gut so. Hier sieht nicht mal der Server den Klartext.', 88],
-        [false, 'Genau deshalb sind wir hier. Schick mir die Notizen, wenn du soweit bist.', 12],
+        [false, 'Hey — are you on the new secure channel?', 95],
+        [true, 'Yes, RenkerVault is running. We will compare safety numbers shortly.', 92],
+        [false, 'Perfect. I no longer use the old messengers for this.', 90],
+        [true, 'Good. Here not even the server sees the plaintext.', 88],
+        [false, 'Exactly why we are here. Send me the notes when you are ready.', 12],
       ],
     },
     {
-      peer: milan, sub: 'zuletzt aktiv vor 26 min',
+      peer: milan, sub: 'last active 26 min ago',
       script: [
-        [true, 'Milan, die Schlüsselrotation für die Gruppe ist durch.', 200],
-        [false, 'Sauber. Epoch-Wechsel wird bei mir im Security-Log angezeigt.', 197],
-        [true, 'Wenn dein zweites Gerät dazukommt: erst manuell bestätigen!', 195],
-        [false, 'Klar — neue Geräte ohne Bestätigung wären ja genau das Einfallstor.', 194],
+        [true, 'Milan, the key rotation for the group is done.', 200],
+        [false, 'Clean. The epoch change shows in my security log.', 197],
+        [true, 'When your second device joins: confirm it manually first!', 195],
+        [false, 'Sure — new devices without confirmation would be exactly the entry point.', 194],
       ],
     },
     {
-      peer: brandt, sub: 'verschwindende Nachrichten: 24 h',
+      peer: brandt, sub: 'disappearing messages: 24 h',
       script: [
-        [false, 'Die Besprechungsnotizen bitte nur über diesen Kanal.', 300],
-        [true, 'Selbstverständlich. Timer steht auf 24 Stunden.', 298],
-        [false, 'Danke. Diskretion ist hier alles.', 296],
+        [false, 'The meeting notes only over this channel, please.', 300],
+        [true, 'Of course. The timer is set to 24 hours.', 298],
+        [false, 'Thanks. Discretion is everything here.', 296],
       ],
     },
   ];
@@ -171,7 +171,7 @@ export async function buildDemoWorld(identity: Identity): Promise<{
   symKeys.set(gid, { key: newGroupEpochKey(), epoch: 3 });
   const gFp = groupFingerprint(symKeys.get(gid)!.key, 3);
   chats.push({
-    id: gid, kind: 'group', origin: 'demo', name: 'Werkstatt Nord', sub: '4 Mitglieder · E2E (Epoche 3)',
+    id: gid, kind: 'group', origin: 'demo', name: 'Werkstatt Nord', sub: '4 members · E2E (epoch 3)',
     members: [
       { id: me, name: myName, role: 'owner' },
       { id: 'nadja', name: 'Nadja Weiß', role: 'admin' },
@@ -182,20 +182,20 @@ export async function buildDemoWorld(identity: Identity): Promise<{
     disappearSec: 0, epoch: 3, keyRotatedAt: minsAgo(75), unread: 2,
   });
   messages[gid] = [
-    sysMsg('Gruppe erstellt · Ende-zu-Ende-verschlüsselt (Epoche 1)', minsAgo(600)),
-    await symMsg(gid, 'nadja', 'Nadja Weiß', false, 'Willkommen im sicheren Gruppenkanal der Werkstatt.', minsAgo(590)),
-    await symMsg(gid, me, myName, true, 'Danke! Bitte alle einmal die Geräteliste prüfen.', minsAgo(585)),
-    sysMsg('Milan Kovač wurde hinzugefügt · Schlüssel neu verteilt (Epoche 2)', minsAgo(400)),
-    await symMsg(gid, 'milan', 'Milan Kovač', false, 'Bin drin. Fingerprint der Gruppe stimmt bei mir.', minsAgo(395)),
-    sysMsg('Schlüsselrotation durch Owner · Epoche 3 aktiv', minsAgo(75)),
-    await symMsg(gid, 'brandt', 'Dr. A. Brandt', false, 'Rotation bei mir angekommen. Alles grün.', minsAgo(70)),
+    sysMsg('Group created · end-to-end encrypted (epoch 1)', minsAgo(600)),
+    await symMsg(gid, 'nadja', 'Nadja Weiß', false, 'Welcome to the workshop secure group channel.', minsAgo(590)),
+    await symMsg(gid, me, myName, true, 'Thanks! Everyone please check the device list once.', minsAgo(585)),
+    sysMsg('Milan Kovač was added · keys re-distributed (epoch 2)', minsAgo(400)),
+    await symMsg(gid, 'milan', 'Milan Kovač', false, 'I am in. The group fingerprint matches on my end.', minsAgo(395)),
+    sysMsg('Key rotation by the owner · epoch 3 active', minsAgo(75)),
+    await symMsg(gid, 'brandt', 'Dr. A. Brandt', false, 'Rotation arrived on my end. All green.', minsAgo(70)),
   ];
 
   const cid = 'ch-bulletin';
   symKeys.set(cid, { key: newGroupEpochKey(), epoch: 1 });
   const cFp = groupFingerprint(symKeys.get(cid)!.key, 1);
   chats.push({
-    id: cid, kind: 'channel', origin: 'demo', name: 'RENKER BULLETIN', sub: 'Broadcast · 132 Abonnenten · read-only',
+    id: cid, kind: 'channel', origin: 'demo', name: 'RENKER BULLETIN', sub: 'Broadcast · 132 subscribers · read-only',
     members: [
       { id: me, name: myName, role: 'owner' },
       { id: 'nadja', name: 'Nadja Weiß', role: 'admin' },
@@ -205,9 +205,9 @@ export async function buildDemoWorld(identity: Identity): Promise<{
     subscriberCount: 132, unread: 0,
   });
   messages[cid] = [
-    sysMsg('Kanal erstellt · Broadcast-Modus (Owner/Admins senden, Abonnenten lesen)', minsAgo(2000)),
-    await symMsg(cid, me, myName, true, '📢 RenkerVault v0.1 ist live. Meldet verdächtige Geräte-Anfragen sofort.', minsAgo(1400)),
-    await symMsg(cid, 'nadja', 'Nadja Weiß', false, 'Reminder: Safety Numbers nach jedem Schlüsselwechsel neu vergleichen.', minsAgo(700)),
+    sysMsg('Channel created · broadcast mode (owners/admins send, subscribers read)', minsAgo(2000)),
+    await symMsg(cid, me, myName, true, '📢 RenkerVault v0.1 is live. Report suspicious device requests immediately.', minsAgo(1400)),
+    await symMsg(cid, 'nadja', 'Nadja Weiß', false, 'Reminder: re-compare safety numbers after every key change.', minsAgo(700)),
   ];
 
   const peerKeys: Record<string, DemoPeerKey> = {};
@@ -216,11 +216,11 @@ export async function buildDemoWorld(identity: Identity): Promise<{
   }
 
   const secLog: SecEvent[] = [
-    { id: uid('e'), ts: minsAgo(1500), severity: 'info', kind: 'VAULT_INIT', text: 'Lokaler Vault erstellt (AES-256-GCM, Argon2id)' },
-    { id: uid('e'), ts: minsAgo(1499), severity: 'info', kind: 'KEYGEN', text: 'Identitätsschlüssel erzeugt (X25519 + Ed25519)' },
-    { id: uid('e'), ts: minsAgo(600), severity: 'info', kind: 'SESSION', text: 'Double-Ratchet-Sitzungen mit 3 Kontakten etabliert' },
-    { id: uid('e'), ts: minsAgo(75), severity: 'info', kind: 'KEY_ROTATION', text: 'Gruppenschlüssel „Werkstatt Nord" rotiert → Epoche 3' },
-    { id: uid('e'), ts: minsAgo(4), severity: 'info', kind: 'VAULT_CHECK', text: 'Integritätsprüfung der lokalen Datenbank: OK' },
+    { id: uid('e'), ts: minsAgo(1500), severity: 'info', kind: 'VAULT_INIT', text: 'Local vault created (AES-256-GCM, Argon2id)' },
+    { id: uid('e'), ts: minsAgo(1499), severity: 'info', kind: 'KEYGEN', text: 'Identity keys generated (X25519 + Ed25519)' },
+    { id: uid('e'), ts: minsAgo(600), severity: 'info', kind: 'SESSION', text: 'Double Ratchet sessions established with 3 contacts' },
+    { id: uid('e'), ts: minsAgo(75), severity: 'info', kind: 'KEY_ROTATION', text: 'Group key "Werkstatt Nord" rotated → epoch 3' },
+    { id: uid('e'), ts: minsAgo(4), severity: 'info', kind: 'VAULT_CHECK', text: 'Integrity check of the local database: OK' },
   ];
 
   return { chats, messages, secLog, peerKeys };
@@ -249,7 +249,7 @@ export async function restoreDemoSessions(
 export async function demoSendDirect(peerId: string, text: string): Promise<{ ct: string }> {
   const mine = myRatchets.get(peerId);
   const peer = peers.get(peerId);
-  if (!mine || !peer) throw new Error('Unbekannter Kontakt');
+  if (!mine || !peer) throw new Error('unknown contact');
   const enc = await mine.encrypt(utf8.enc(text));
   await peer.ratchet.decrypt(enc);
   return { ct: enc.ct };
@@ -272,14 +272,14 @@ export function demoPeerName(peerId: string): string {
 
 export async function demoSendSym(chatId: string, text: string): Promise<{ ct: string }> {
   const st = symKeys.get(chatId);
-  if (!st) throw new Error('Unbekannte Gruppe / unbekannter Kanal');
+  if (!st) throw new Error('unknown group / unknown channel');
   const ct = await aesGcmEncrypt(st.key, utf8.enc(text));
   return { ct: b64.enc(ct) };
 }
 
 export function demoRotateEpoch(chatId: string): { epoch: number; fp: string } {
   const st = symKeys.get(chatId);
-  if (!st) throw new Error('Unbekannte Gruppe / unbekannter Kanal');
+  if (!st) throw new Error('unknown group / unknown channel');
   st.key = newGroupEpochKey();
   st.epoch += 1;
   return { epoch: st.epoch, fp: groupFingerprint(st.key, st.epoch) };

@@ -108,9 +108,9 @@ export interface Identity {
   edPriv: string; edPub: string;
   prekeyPriv: string; prekeyPub: string;
   pqPrekeyPriv: string; pqPrekeyPub: string;
-  // Signaturen ueber prekeyPub/pqPrekeyPub mit edPriv — binden die
-  // Prekeys nachweisbar an die Identitaet, statt sie vom Relay ungeprueft
-  // zu uebernehmen (klassisches X3DH-Element, siehe SECURITY_AUDIT.md
+  // Signatures over prekeyPub/pqPrekeyPub with edPriv — bind the
+  // prekeys demonstrably to the identity, instead of adopting them
+  // unchecked from the relay (a classical X3DH element, see SECURITY_AUDIT.md
   // PREKEY-SIG).
   prekeySig: string; pqPrekeySig: string;
   deviceId: string;
