@@ -1,25 +1,25 @@
-# Caddyfile fuer den RenkerVault-Relay.
-# Domain durch die eigene (Sub-)Domain ersetzen, die auf die Server-IP zeigt.
-# Caddy beschafft und erneuert das TLS-Zertifikat automatisch (Let's Encrypt)
-# und leitet WebSocket-Verbindungen transparent an den lokal laufenden
-# Node-Relay weiter — kein zusaetzliches WebSocket-Konfigurations-Flag noetig.
+# Caddyfile for the RenkerVault relay.
+# Replace the domain with your own (sub)domain that points at the server IP.
+# Caddy obtains and renews the TLS certificate automatically (Let's Encrypt)
+# and forwards WebSocket connections transparently to the locally running
+# Node relay — no extra WebSocket configuration flag needed.
 
-chat.deinedomain.de {
+chat.yourdomain.com {
     reverse_proxy 127.0.0.1:8787
 
-    # DDoS-/Verbindungsflut-Schutz (Haertungs-Roadmap Punkt 9, SECURITY.md
-    # Abschnitt 4 Punkt 12): Der Relay selbst begrenzt bereits pro Socket
-    # (30 Nachrichten/s) und pro IP (20 gleichzeitige Verbindungen), siehe
-    # server/src/index.js — das schuetzt aber nur EIN einzelnes IP-Herkunfts-
-    # muster, nicht verteilte Anfragen ueber viele IPs (echtes DDoS). Vanilla
-    # Caddy hat KEIN eingebautes Rate-Limiting (bewusste Design-Entscheidung
-    # der Caddy-Maintainer) — die Zeile unten braucht das Plugin
-    # github.com/mholt/caddy-ratelimit und einen eigenen Caddy-Build:
+    # DDoS / connection-flood protection (hardening roadmap item 9, SECURITY.md
+    # section 4 item 12): the relay itself already limits per socket
+    # (30 messages/s) and per IP (20 concurrent connections), see
+    # server/src/index.js — but that only protects against ONE single IP origin
+    # pattern, not distributed requests across many IPs (real DDoS). Vanilla
+    # Caddy has NO built-in rate limiting (a deliberate design decision by the
+    # Caddy maintainers) — the line below needs the plugin
+    # github.com/mholt/caddy-ratelimit and a custom Caddy build:
     #
     #   xcaddy build --with github.com/mholt/caddy-ratelimit
     #
-    # Danach den `caddy`-Systembefehl durch den selbstgebauten Binary
-    # ersetzen und diesen Block einkommentieren:
+    # Then replace the `caddy` system command with the self-built binary
+    # and uncomment this block:
     #
     # rate_limit {
     #     zone dynamic_relay {
@@ -30,11 +30,11 @@ chat.deinedomain.de {
     # }
 }
 
-# Fuer echten Schutz gegen VERTEILTE Anfragen (viele IPs gleichzeitig) reicht
-# kein Reverse-Proxy-Setting mehr aus — dafuer ist ein vorgelagerter
-# CDN-/DDoS-Schutzdienst (z. B. Cloudflare im "Proxied"-Modus) der
-# realistische Weg, siehe DEPLOYMENT.md, Abschnitt "DDoS-Schutz".
+# For real protection against DISTRIBUTED requests (many IPs at once) a
+# reverse-proxy setting is no longer enough — for that an upstream
+# CDN/DDoS protection service (e.g. Cloudflare in "Proxied" mode) is the
+# realistic approach, see DEPLOYMENT.md, section "DDoS protection".
 
-# Optional: Zugriff auf den HTTP-Statusendpunkt zusaetzlich absichern/loggen
-# kann hier ergaenzt werden (z. B. log-Direktive, IP-Allowlist fuer /admin-
-# artige Endpunkte). Der Relay selbst hat aktuell keine solchen Endpunkte.
+# Optional: additionally securing/logging access to the HTTP status endpoint
+# can be added here (e.g. a log directive, an IP allowlist for /admin-like
+# endpoints). The relay itself currently has no such endpoints.

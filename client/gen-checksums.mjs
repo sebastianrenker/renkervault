@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 /**
- * Erzeugt SHA256SUMS.txt fuer alle vorhandenen Build-Artefakte (Web-Build,
- * Tauri-Desktop-Bundle, Android-APK). Ersetzt KEINE Code-Signatur — ein
- * Angreifer, der die Auslieferung selbst kontrolliert, koennte sowohl das
- * Artefakt als auch diese Datei manipulieren. Der Sinn liegt darin, dass
- * jemand, der den Build selbst reproduziert (siehe SECURITY.md Abschnitt 4f/4g),
- * den resultierenden Hash gegen einen unabhaengig veroeffentlichten
- * (z. B. per GPG-signierter Release-Notiz) vergleichen kann.
+ * Generates SHA256SUMS.txt for all existing build artifacts (web build,
+ * Tauri desktop bundle, Android APK). Does NOT replace a code signature — an
+ * attacker who controls the distribution itself could tamper with both the
+ * artifact and this file. The point is that someone who reproduces the build
+ * themselves (see SECURITY.md section 4f/4g) can compare the resulting hash
+ * against an independently published one (e.g. via a GPG-signed release note).
  *
- * Verwendung: node gen-checksums.mjs  (nach `npm run build` /
- * `npx tauri build` / Android-Gradle-Build, je nachdem was vorhanden ist)
+ * Usage: node gen-checksums.mjs  (after `npm run build` /
+ * `npx tauri build` / Android Gradle build, whichever is present)
  */
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync, writeFileSync } from 'node:fs';
@@ -44,12 +43,12 @@ async function main() {
         if (existsSync(full) && statSync(full).isFile()) files.push(full);
       }
     } catch {
-      // Muster ohne Treffer (Build-Ziel nicht vorhanden) ist kein Fehler.
+      // A pattern with no match (build target not present) is not an error.
     }
   }
 
   if (files.length === 0) {
-    console.error('Keine Build-Artefakte gefunden — erst `npm run build` / `tauri build` / Android-Build ausfuehren.');
+    console.error('No build artifacts found — run `npm run build` / `tauri build` / the Android build first.');
     process.exit(1);
   }
 

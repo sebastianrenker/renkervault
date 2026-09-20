@@ -1,26 +1,26 @@
-"""Erzeugt das RenkerVault-Schild-Icon in allen von Tauri/Windows benötigten
-Größen/Formaten aus einer einzigen Vektor-Zeichnung (reines Pillow, kein SVG-Renderer nötig).
+"""Generates the RenkerVault shield icon in all sizes/formats required by
+Tauri/Windows from a single vector drawing (pure Pillow, no SVG renderer needed).
 """
 import math
 from PIL import Image, ImageDraw
 
-BG = (10, 15, 13, 255)        # Graphit (--bg)
-ACCENT = (46, 230, 168, 255)  # Smaragd (--accent)
+BG = (10, 15, 13, 255)        # Graphite (--bg)
+ACCENT = (46, 230, 168, 255)  # Emerald (--accent)
 ACCENT_DIM = (46, 230, 168, 90)
 WHITE = (214, 229, 222, 255)
 
 
 def draw_shield(size: int) -> Image.Image:
-    s = size * 4  # supersampling für glatte Kanten
+    s = size * 4  # supersampling for smooth edges
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     cx = s / 2
 
-    # Hintergrund: abgerundetes dunkles Quadrat
+    # Background: rounded dark square
     r = s * 0.18
     d.rounded_rectangle([0, 0, s - 1, s - 1], radius=r, fill=BG)
 
-    # Schild-Umriss
+    # Shield outline
     top = s * 0.18
     shield_w = s * 0.56
     left = cx - shield_w / 2
@@ -37,7 +37,7 @@ def draw_shield(size: int) -> Image.Image:
     ]
     d.polygon(pts, fill=(*ACCENT[:3], 40), outline=ACCENT, width=max(2, int(s * 0.014)))
 
-    # Schloss-Körper
+    # Lock body
     lock_w = s * 0.22
     lock_h = s * 0.18
     lock_top = s * 0.50
@@ -45,13 +45,13 @@ def draw_shield(size: int) -> Image.Image:
     lx1, ly1 = cx + lock_w / 2, lock_top + lock_h
     d.rounded_rectangle([lx0, ly0, lx1, ly1], radius=s * 0.02, fill=(*ACCENT[:3], 60), outline=ACCENT, width=max(2, int(s * 0.012)))
 
-    # Schloss-Bügel
+    # Lock shackle
     shackle_r = lock_w * 0.42
     shackle_top = ly0 - shackle_r
     d.arc([cx - shackle_r, shackle_top - shackle_r * 0.15, cx + shackle_r, shackle_top + shackle_r * 1.5],
           start=180, end=360, fill=ACCENT, width=max(2, int(s * 0.02)))
 
-    # Schlüsselloch
+    # Keyhole
     hole_r = s * 0.018
     hole_cy = ly0 + lock_h * 0.35
     d.ellipse([cx - hole_r, hole_cy - hole_r, cx + hole_r, hole_cy + hole_r], fill=ACCENT)

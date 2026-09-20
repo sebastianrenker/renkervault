@@ -1,5 +1,5 @@
 [Unit]
-Description=RenkerVault Zero-Knowledge Relay
+Description=RenkerVault Content-Blind Relay
 After=network.target
 
 [Service]
@@ -12,9 +12,9 @@ ExecStart=/usr/bin/node src/index.js
 Restart=on-failure
 RestartSec=5
 
-# Haertung (systemd-Sandbox) — der Relay braucht keinerlei Privilegien,
-# Dateisystemzugriff (außer dem eigenen Arbeitsverzeichnis) oder Netzwerk-
-# Faehigkeiten jenseits des normalen Server-Sockets.
+# Hardening (systemd sandbox) — the relay needs no privileges at all,
+# no filesystem access (beyond its own working directory) and no network
+# capabilities beyond the normal server socket.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -2,7 +2,7 @@
 node_modules/
 **/node_modules/
 
-# Build-Ausgaben (regenerierbar, siehe client/gen-checksums.mjs fuer Release-Checksummen)
+# Build outputs (regenerable, see client/gen-checksums.mjs for release checksums)
 client/dist/
 client/gen/
 client/src-tauri/target/
@@ -50,5 +50,5 @@ npm-debug.log*
 # Rust
 Cargo.lock.bak
 
-# Interne Recherche-/Konzeptdokumente — nur lokal, nicht im oeffentlichen Repo
+# Internal research/concept documents — local only, not in the public repo
 docs/inventions/

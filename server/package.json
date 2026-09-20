@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "RenkerVault Zero-Knowledge Relay - speichert und routet ausschliesslich Chiffretext",
+  "description": "RenkerVault content-blind relay - stores and routes ciphertext only",
   "scripts": {
     "start": "node src/index.js",
     "test": "vitest run"

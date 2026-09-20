@@ -1,11 +1,11 @@
-; RenkerVault Windows-Installer (Inno Setup)
+; RenkerVault Windows installer (Inno Setup)
 ; ==========================================
-; Installiert die Tauri-Desktop-App (RenkerVault.exe) plus optional den
-; Zero-Knowledge-Relay-Server zum lokalen Selbstbetrieb.
+; Installs the Tauri desktop app (RenkerVault.exe) plus, optionally, the
+; content-blind relay server for local self-hosting.
 ;
-; Bauen:  ISCC.exe installer\RenkerVault.iss
-; Voraussetzung: client\src-tauri\target\release\renkervault.exe muss existieren
-;                (vorher `npx tauri build` im client-Verzeichnis ausfuehren).
+; Build:  ISCC.exe installer\RenkerVault.iss
+; Requirement: client\src-tauri\target\release\renkervault.exe must exist
+;              (run `npx tauri build` in the client directory first).
 
 #define MyAppName "RenkerVault"
 #define MyAppVersion "0.1.0"
@@ -36,12 +36,11 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
 [Languages]
-Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "relaycomponent"; Description: "Lokalen Zero-Knowledge-Relay-Server mitinstallieren (fuer eigenen Server-Betrieb, benoetigt Node.js)"; Flags: unchecked
+Name: "relaycomponent"; Description: "Also install the local content-blind relay server (for running your own server, requires Node.js)"; Flags: unchecked
 
 [Files]
 Source: "{#ClientDir}\src-tauri\target\release\renkervault.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -54,8 +53,8 @@ Source: "..\SECURITY.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\RenkerVault Relay-Server (lokal)"; Filename: "{app}\start-relay.bat"; Tasks: relaycomponent
-Name: "{group}\Sicherheitsdokumentation (SECURITY.md)"; Filename: "{app}\SECURITY.md"
+Name: "{group}\RenkerVault Relay Server (local)"; Filename: "{app}\start-relay.bat"; Tasks: relaycomponent
+Name: "{group}\Security documentation (SECURITY.md)"; Filename: "{app}\SECURITY.md"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
@@ -63,4 +62,4 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-german.WelcomeLabel2=Dieses Programm installiert [name/ver] auf Ihrem Computer.%n%nRenkerVault ist ein Ende-zu-Ende-verschluesselter Chat-Prototyp. Wichtige Sicherheitshinweise stehen in SECURITY.md im Installationsverzeichnis.%n%nBenoetigt: Microsoft Edge WebView2 Runtime (auf aktuellen Windows-10/11-Systemen i. d. R. bereits vorhanden).
+english.WelcomeLabel2=This program installs [name/ver] on your computer.%n%nRenkerVault is an end-to-end encrypted chat prototype. Important security notes are in SECURITY.md in the installation directory.%n%nRequires: Microsoft Edge WebView2 Runtime (usually already present on current Windows 10/11 systems).

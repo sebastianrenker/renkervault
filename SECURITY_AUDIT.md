@@ -201,7 +201,7 @@ low damage).
 |---|---|
 | **Protected assets** | Metadata, potentially secrets in error messages |
 | **Attack vector** | Access to server `console.log` output, the client-side browser DevTools console, Tauri `tauri-plugin-log` files |
-| **Current protection** | The server logs only `[GUARD] Lockout für <userId>`, `[ERR] <err.message>` — no payload/key logs found. The client, per the previous audit, has no debug logs with secrets (comment/log cleanup was part of the last hardening pass). |
+| **Current protection** | The server logs only `[GUARD] Lockout for <userId>`, `[ERR] <err.message>` — no payload/key logs found. The client, per the previous audit, has no debug logs with secrets (comment/log cleanup was part of the last hardening pass). |
 | **Remaining risk** | `console.error('[ERR]', err.message)` in the server could, on certain error paths (e.g. a `JSON.parse` error with the original string in the error message, or a future added error path), accidentally land payload fragments in logs — currently not the case, but not safeguarded by a structural rule (e.g. a linter rule against `console.log(msg)` with a raw message object), only by code review. `tauri-plugin-log` is included, but it was not checked whether/where it writes by default and whether sensitive IPC arguments could be logged. |
 | **Severity** | Low (currently no found leakage) to Medium (no structural safeguard against future regressions) |
 | **Concrete improvement** | A lint rule/code-review checklist: never pass raw envelope/message objects to `console.*`, only selected, known-insensitive fields. Restrict the `tauri-plugin-log` configuration explicitly to debug builds or check the log level/target for release builds. |

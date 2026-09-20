@@ -34,7 +34,7 @@ mod win {
             )
         };
         if ok == 0 {
-            return Err(format!("CryptProtectData fehlgeschlagen: {}", std::io::Error::last_os_error()));
+            return Err(format!("CryptProtectData failed: {}", std::io::Error::last_os_error()));
         }
         Ok(unsafe { take(output) })
     }
@@ -54,7 +54,7 @@ mod win {
             )
         };
         if ok == 0 {
-            return Err(format!("CryptUnprotectData fehlgeschlagen: {}", std::io::Error::last_os_error()));
+            return Err(format!("CryptUnprotectData failed: {}", std::io::Error::last_os_error()));
         }
         Ok(unsafe { take(output) })
     }
@@ -65,12 +65,12 @@ pub use win::{protect, unprotect};
 
 #[cfg(not(target_os = "windows"))]
 pub fn protect(_data: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DPAPI ist nur unter Windows verfügbar".into())
+    Err("DPAPI is only available on Windows".into())
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn unprotect(_data: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DPAPI ist nur unter Windows verfügbar".into())
+    Err("DPAPI is only available on Windows".into())
 }
 
 #[tauri::command]
@@ -108,7 +108,7 @@ mod tests {
         let found = protected
             .windows(secret.len())
             .any(|w| w == secret.as_slice());
-        assert!(!found, "Klartext duerfte nicht unveraendert im geschuetzten Blob vorkommen");
+        assert!(!found, "plaintext must not appear unchanged in the protected blob");
     }
 
     #[test]

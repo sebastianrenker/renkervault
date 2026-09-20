@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Erlaubt unverschluesseltes ws:// AUSSCHLIESSLICH fuer localhost/127.0.0.1
-  (Relay auf demselben Geraet) und 10.0.2.2 (Alias des Android-Emulators fuer
-  den Entwicklungsrechner). Fuer jeden anderen Host (echte Domain, LAN-IP
-  eines eigenen Servers usw.) verlangt Android standardmaessig TLS — das
-  entspricht bewusst der App-eigenen Empfehlung, fuer alles außer dem
-  eigenen Geraet zwingend wss:// zu verwenden (siehe SECURITY.md).
+  Allows unencrypted ws:// EXCLUSIVELY for localhost/127.0.0.1
+  (relay on the same device) and 10.0.2.2 (the Android emulator's alias for
+  the development machine). For any other host (a real domain, the LAN IP
+  of your own server, etc.) Android requires TLS by default — this
+  deliberately matches the app's own recommendation to use wss:// for
+  anything other than your own device (see SECURITY.md).
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
@@ -15,41 +15,39 @@
     </domain-config>
 
     <!--
-      TLS-Zertifikats-Pinning (Härtungs-Roadmap Punkt 7, SECURITY.md
-      Abschnitt 4f/4g) — bewusst NICHT standardmäßig aktiv, siehe Begründung:
+      TLS certificate pinning (hardening roadmap item 7, SECURITY.md
+      section 4f/4g) — deliberately NOT active by default, see the rationale:
 
-      RenkerVault laesst den Relay-Host in den Einstellungen frei waehlen
-      (Settings::relayUrl) — ein <pin-set> in dieser Datei ist aber statisch
-      und an EINE fest einkompilierte Domain gebunden. Ein Pin fuer eine
-      Domain, die noch niemand eingegeben hat, waere bedeutungslos bzw.
-      wuerde bei jedem Relay-Wechsel den kompletten TLS-Verkehr blockieren.
-      Pinning ist deshalb nur fuer Betreiber sinnvoll, die eine eigene,
-      GEBRANDETE App-Variante mit genau EINEM festen Relay ausliefern.
+      RenkerVault lets the relay host be chosen freely in the settings
+      (Settings::relayUrl) — but a <pin-set> in this file is static and
+      bound to ONE hard-compiled domain. A pin for a domain that nobody has
+      entered yet would be meaningless, or it would block all TLS traffic on
+      every relay change. Pinning is therefore only useful for operators who
+      ship their own BRANDED app variant with exactly ONE fixed relay.
 
-      Fuer diesen Fall: Domain-Zeile einkommentieren, den Platzhalter-Pin
-      durch den echten SPKI-SHA-256-Pin des eigenen Zertifikats ersetzen
-      (mindestens zwei Pins hinterlegen — Backup-Pin fuer die naechste
-      Zertifikatsrotation, sonst sperrt man sich beim naechsten
-      Zertifikatswechsel selbst aus):
+      For that case: uncomment the domain line, replace the placeholder pin
+      with the real SPKI-SHA-256 pin of your own certificate (store at least
+      two pins — a backup pin for the next certificate rotation, otherwise you
+      lock yourself out on the next certificate change):
 
-        openssl s_client -connect mein-relay.beispiel.de:443 -servername mein-relay.beispiel.de </dev/null 2>/dev/null \
+        openssl s_client -connect my-relay.example.com:443 -servername my-relay.example.com </dev/null 2>/dev/null \
           | openssl x509 -pubkey -noout \
           | openssl pkey -pubin -outform der \
           | openssl dgst -sha256 -binary | openssl enc -base64
 
       <domain-config>
-          <domain includeSubdomains="false">mein-relay.beispiel.de</domain>
+          <domain includeSubdomains="false">my-relay.example.com</domain>
           <pin-set expiration="2027-01-01">
-              <pin digest="SHA-256">PLATZHALTER_PRIMAERER_PIN==</pin>
-              <pin digest="SHA-256">PLATZHALTER_BACKUP_PIN==</pin>
+              <pin digest="SHA-256">PLACEHOLDER_PRIMARY_PIN==</pin>
+              <pin digest="SHA-256">PLACEHOLDER_BACKUP_PIN==</pin>
           </pin-set>
       </domain-config>
 
-      Ausserhalb von Android existiert diese Schutzschicht nicht: Weder der
-      Browser-Prototyp noch die Tauri-Desktop-Variante (nutzt das System-
-      WebView, z. B. WebView2 unter Windows) bieten eine oeffentliche API,
-      um TLS-Zertifikate fuer WebSocket-Verbindungen manuell zu pinnen —
-      das ist eine Plattformgrenze, keine Untaetigkeit dieses Projekts.
+      Outside Android this protection layer does not exist: neither the
+      browser prototype nor the Tauri desktop variant (which uses the system
+      WebView, e.g. WebView2 on Windows) offers a public API to manually pin
+      TLS certificates for WebSocket connections — that is a platform limit,
+      not an inaction of this project.
     -->
 
     <base-config cleartextTrafficPermitted="false" />

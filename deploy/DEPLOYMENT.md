@@ -212,7 +212,7 @@ sudo ufw limit 443/tcp
 ```
 
 **2) `fail2ban` against repeated auth failures:** the relay already logs
-lockouts to stdout (`[GUARD] Lockout fuer <userId> ...`), viewable via
+lockouts to stdout (`[GUARD] Lockout for <userId> ...`), viewable via
 `journalctl -u renkervault-relay`. A simple fail2ban jail
 can additionally block IPs with conspicuously many lockouts at the firewall level:
 
@@ -231,7 +231,7 @@ bantime  = 3600
 ```ini
 # /etc/fail2ban/filter.d/renkervault-relay.conf
 [Definition]
-failregex = ^.*\[GUARD\] Lockout fuer .* <HOST>?.*$
+failregex = ^.*\[GUARD\] Lockout for .* <HOST>?.*$
 ```
 
 Note: the relay currently logs no IP address in the lockout line
