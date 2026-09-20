@@ -1,17 +1,17 @@
-# Teil der Renker-Plattform
+# Part of the Renker platform
 
-Dieses Repository (**renkervault**) ist die Säule **SECURE — Identity- und Secure-Communication-Layer** der **Renker**-Plattform — einer Infrastruktur für vertrauenswürdige, autonome KI-Systeme.
+This repository (**renkervault**) is the **SECURE — identity and secure-communication layer** pillar of the **Renker** platform — an infrastructure for trustworthy, autonomous AI systems.
 
-Die Gesamtarchitektur, die gemeinsamen Primitive (Identity, Permissions, Audit, Policy …) und die Rollen der drei Säulen sind im Fundament-Repo **renker-core** dokumentiert:
+The overall architecture, the shared primitives (Identity, Permissions, Audit, Policy …), and the roles of the three pillars are documented in the foundation repo **renker-core**:
 
 - **renker-core:** https://github.com/sebastianrenker/renker-core
-- **Plattform-Wiki (im renker-core-Repo):** https://github.com/sebastianrenker/renker-core/blob/main/docs/wiki/Home.md
+- **Platform wiki (in the renker-core repo):** https://github.com/sebastianrenker/renker-core/blob/main/docs/wiki/Home.md
 
-> Hinweis: renker-core ist derzeit ein **privates** Repository; die Links sind für Berechtigte sichtbar.
+> Note: renker-core is currently a **private** repository; the links are visible to authorized users.
 
-## Die drei Säulen
+## The three pillars
 
-| Säule | Rolle | Repo |
+| Pillar | Role | Repo |
 | --- | --- | --- |
 | Rencora | ACT | https://github.com/sebastianrenker/rencora |
 | RenkerVault | SECURE | https://github.com/sebastianrenker/renkervault |

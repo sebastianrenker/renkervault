@@ -1,57 +1,56 @@
-# METADATA.md — Feldweise Metadaten-Analyse des Envelope-Formats
+# METADATA.md — Field-by-field metadata analysis of the envelope format
 
-Vollständige Aufschlüsselung, welches Feld des `Envelope`-Objekts
-(`client/src/net/client.ts`) für den Relay-Betreiber sichtbar ist und
-welches ausschließlich innerhalb der Ende-zu-Ende-verschlüsselten
-Nutzlast (`ct`) liegt. Ergänzt [THREAT_MODEL.md](THREAT_MODEL.md) um die
-Feldebene, wie im Audit-Auftrag Abschnitt 5 gefordert.
+A complete breakdown of which field of the `Envelope` object
+(`client/src/net/client.ts`) is visible to the relay operator and
+which lies exclusively inside the end-to-end-encrypted
+payload (`ct`). Extends [THREAT_MODEL.md](THREAT_MODEL.md) to the
+field level, as required by the audit task, section 5.
 
-**Grundprinzip:** Alles außer `ct` selbst (und den für den Handshake
-zwingend nötigen Feldern `x3dh`/`header`) ist für den Relay technisch
-sichtbares Klartext-JSON — es gibt aktuell KEINE zusätzliche
-Envelope-Verschlüsselungsschicht über die reine Payload hinaus.
+**Basic principle:** everything except `ct` itself (and the fields
+strictly required for the handshake, `x3dh`/`header`) is technically
+visible plaintext JSON to the relay — there is currently NO additional
+envelope-encryption layer beyond the raw payload.
 
-| Feld | Sichtbar für Relay? | Warum / Anmerkung |
+| Field | Visible to relay? | Why / note |
 |---|---|---|
-| `ct` | ❌ Nein — das ist der eigentliche Ciphertext | AES-256-GCM-verschlüsselt, authentifiziert über den Ratchet- bzw. Gruppen-Schlüssel |
-| `chatId` | ✅ Ja | Für Gruppen: zufällige ID, kein Klartext-Gruppenname. Für 1:1: identisch mit der Konto-ID des Gegenübers |
-| `chatKind` | ✅ Ja | `direct`/`group` — legt Kommunikationsmuster offen (1:1 vs. Gruppe) |
-| `kind` | ✅ Ja | `text`/`file`/`edit`/`delete`/`reaction`/`presence`/`call-*` — der Relay sieht z. B., dass gerade ein Anruf signalisiert wird, auch ohne Audio/Video-Inhalt zu sehen |
-| `msgId` | ✅ Ja | Zufällige ID pro Nachricht, kein Klartext-Inhalt, aber ermöglicht Verkettung von edit/delete/reaction-Events zur ursprünglichen Nachricht |
-| `ts` | ✅ Ja | Sende-Zeitstempel — direkt nutzbar für Timing-Korrelation (siehe THREAT_MODEL.md, Cover-Traffic-Abschnitt) |
-| `fromName` | ✅ Ja | **Bewusster Kompromiss, dokumentiert seit SECURITY.md** — Klartext-Anzeigename des Absenders im Envelope, nicht in `ct`. Ließe sich prinzipiell in die verschlüsselte Payload verschieben, wurde aber aus UI-Einfachheit (Relay muss Push-Vorschauen o. Ä. nicht entschlüsseln können) nicht geändert |
-| `fileName` / `fileSize` / `fileMime` | ✅ Ja | Dateiname und -typ sind Klartext; die tatsächliche Byte-Größe ist seit dem Padding-Update (Abschnitt 4g in SECURITY.md) auf eine von 9 Stufen genormt, nicht mehr exakt proportional zur Rohdatei — aber `fileSize` als *Feld* transportiert weiterhin die echte Originalgröße als Metadatum |
-| `expiresAt` | ✅ Ja | Ablaufzeit für verschwindende Nachrichten — verrät indirekt die pro Chat konfigurierte Aufbewahrungsdauer |
-| `replyTo` (`{id, fromName, preview}`) | ✅ Ja | **Zitat-Vorschautext liegt im Klartext des Envelopes**, nicht in `ct` — der schwächste Punkt der aktuellen Metadaten-Minimierung. Ein Angreifer mit Relay-Sicht sieht damit Textausschnitte, selbst wenn er den Rest der Konversation nicht entschlüsseln kann |
-| `forwardedFrom` | ✅ Ja | Name der ursprünglichen Quelle einer weitergeleiteten Nachricht, Klartext |
-| `targetMsgId` | ✅ Ja | Referenz-ID bei edit/delete/reaction, keine Inhaltsdaten |
-| `emoji` / `reactionOp` | ✅ Ja | Die Reaktion selbst (z. B. 👍) läuft aktuell als Klartext-Feld, nicht durch `ct` |
-| `presence` | ✅ Ja | Online/Offline-Signal, Klartext (ohnehin nur Best-Effort, siehe SECURITY.md 3) |
-| `header` (`{dh, pn, n}`) | ✅ Ja (zwingend) | Ratchet-Header muss für den Empfänger lesbar sein, um überhaupt entschlüsseln zu können — enthält den öffentlichen DH-Schlüssel und Nachrichtenzähler, keine geheimen Werte |
-| `x3dh` (`{ephPub, identityPub, pqCt, otpkId}`) | ✅ Ja (zwingend, nur bei Erstkontakt) | Öffentliche Handshake-Werte, für X3DH konstruktionsbedingt notwendig sichtbar |
-| `tag` | ✅ Ja, aber absichtlich NICHT auf die Konto-ID rückführbar | Sealed-Sender-Tag statt Konto-ID ab der zweiten 1:1-Nachricht (siehe SECURITY.md Abschnitt 3a) |
-| `from` (Zustell-Metafeld, vom Relay selbst gesetzt) | ✅ Ja bei Erstkontakt, `null` bei Sealed-Sender-Folgenachrichten | Serverseitig aus der authentifizierten WebSocket-Verbindung gesetzt, nicht vom Client übermittelt |
+| `ct` | ❌ No — this is the actual ciphertext | AES-256-GCM-encrypted, authenticated via the ratchet or group key |
+| `chatId` | ✅ Yes | For groups: a random ID, no plaintext group name. For 1:1: identical to the account ID of the counterpart |
+| `chatKind` | ✅ Yes | `direct`/`group` — reveals the communication pattern (1:1 vs. group) |
+| `kind` | ✅ Yes | `text`/`file`/`edit`/`delete`/`reaction`/`presence`/`call-*` — the relay sees, e.g., that a call is being signaled, even without seeing audio/video content |
+| `msgId` | ✅ Yes | A random ID per message, no plaintext content, but enables chaining edit/delete/reaction events to the original message |
+| `ts` | ✅ Yes | Send timestamp — directly usable for timing correlation (see THREAT_MODEL.md, cover-traffic section) |
+| `fromName` | ✅ Yes | **A deliberate trade-off, documented since SECURITY.md** — the sender's plaintext display name in the envelope, not in `ct`. It could in principle be moved into the encrypted payload, but was not changed for UI simplicity (the relay does not need to decrypt to render push previews and the like) |
+| `fileName` / `fileSize` / `fileMime` | ✅ Yes | The file name and type are plaintext; the actual byte size is, since the padding update (section 4g in SECURITY.md), normalized to one of 9 buckets, no longer exactly proportional to the raw file — but `fileSize` as a *field* still transports the true original size as metadata |
+| `expiresAt` | ✅ Yes | Expiry time for disappearing messages — indirectly reveals the retention period configured per chat |
+| `replyTo` (`{id, fromName, preview}`) | ✅ Yes | **The quote preview text is in the plaintext of the envelope**, not in `ct` — the weakest point of the current metadata minimization. An attacker with relay visibility thereby sees text excerpts, even if they cannot decrypt the rest of the conversation |
+| `forwardedFrom` | ✅ Yes | Name of the original source of a forwarded message, plaintext |
+| `targetMsgId` | ✅ Yes | Reference ID for edit/delete/reaction, no content data |
+| `emoji` / `reactionOp` | ✅ Yes | The reaction itself (e.g. 👍) currently travels as a plaintext field, not through `ct` |
+| `presence` | ✅ Yes | Online/offline signal, plaintext (best-effort anyway, see SECURITY.md 3) |
+| `header` (`{dh, pn, n}`) | ✅ Yes (mandatory) | The ratchet header must be readable by the recipient to decrypt at all — contains the public DH key and message counter, no secret values |
+| `x3dh` (`{ephPub, identityPub, pqCt, otpkId}`) | ✅ Yes (mandatory, only on first contact) | Public handshake values, necessarily visible by construction for X3DH |
+| `tag` | ✅ Yes, but deliberately NOT traceable to the account ID | A sealed-sender tag instead of the account ID from the second 1:1 message on (see SECURITY.md section 3a) |
+| `from` (delivery meta field, set by the relay itself) | ✅ Yes on first contact, `null` for sealed-sender follow-up messages | Set server-side from the authenticated WebSocket connection, not transmitted by the client |
 
-## Priorisierte Empfehlung für weitere Metadaten-Minimierung
+## Prioritized recommendation for further metadata minimization
 
-Am wertvollsten für eine künftige Härtungsrunde, nach Aufwand/Nutzen
-sortiert:
+Most valuable for a future hardening round, sorted by effort/benefit:
 
-1. **`replyTo.preview` in die verschlüsselte Payload verschieben** —
-   größter Klartext-Inhalt-Leak im aktuellen Format, vergleichsweise
-   kleiner Umbau (Envelope-Feld → Teil des JSON, das in `ct` landet).
-2. **`fromName` in die Payload verschieben** — analog, aber mit dem
-   Kompromiss, dass der Relay dann auch bei Erstzustellung an ein neues
-   Gerät keinen Anzeigenamen für lokale Push-Vorschauen liefern kann
-   (aktuell ohnehin nicht implementiert, also kein realer Funktionsverlust).
-3. **`emoji`/`reactionOp` in die Payload verschieben** — geringer
-   Nutzen (kurze, generische Werte), aber trivial mit umzusetzen, sobald
-   1./2. gemacht sind (gleiches Umbaumuster).
-4. **`fileName` verschieben, `fileMime` generisch normieren** (z. B.
-   immer `application/octet-stream` im Klartext-Feld, echter Typ nur in
-   der Payload) — verhindert Rückschlüsse wie "Anhang ist eine
-   `steuererklaerung.pdf`" allein aus Relay-Logs.
+1. **Move `replyTo.preview` into the encrypted payload** —
+   the largest plaintext-content leak in the current format, a comparatively
+   small change (envelope field → part of the JSON that lands in `ct`).
+2. **Move `fromName` into the payload** — analogous, but with the
+   trade-off that the relay then cannot supply a display name for local push
+   previews even on first delivery to a new device
+   (not implemented anyway currently, so no real loss of function).
+3. **Move `emoji`/`reactionOp` into the payload** — low
+   benefit (short, generic values), but trivial to implement once
+   1./2. are done (the same rebuild pattern).
+4. **Move `fileName`, normalize `fileMime` generically** (e.g.
+   always `application/octet-stream` in the plaintext field, the real type only in
+   the payload) — prevents inferences like "the attachment is a
+   `tax_return.pdf`" from relay logs alone.
 
-Nicht sinnvoll minimierbar ohne fundamentalen Architekturwechsel:
-`chatId`, `chatKind`, `ts`, `header`, `x3dh` — diese sind für Routing
-bzw. das Protokoll selbst konstruktionsbedingt notwendig sichtbar.
+Not sensibly minimizable without a fundamental architecture change:
+`chatId`, `chatKind`, `ts`, `header`, `x3dh` — these are necessarily visible
+by construction for routing or the protocol itself.
