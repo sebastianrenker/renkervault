@@ -1,494 +1,493 @@
-# SECURITY.md — Sicherheitsmodell & ehrliche Grenzen
+# SECURITY.md — Security model & honest limits
 
-Stand: Prototyp v0.1, nach dem Security-Hardening-Audit vom 10.08.2026.
-Dieses Dokument beschreibt, **was wirklich geschützt ist**, welche
-Kompromisse der Prototyp eingeht und was vor einem echten Produktiveinsatz
-zwingend passieren müsste.
+As of: prototype v0.1, after the security-hardening audit of 2026-08-10.
+This document describes **what is really protected**, which
+trade-offs the prototype makes, and what would mandatorily have to happen before
+a real production deployment.
 
-> Warum diese Architektur bewusst so gewählt wurde (Stichwort „Chat-Kontrolle"
-> / verpflichtendes Client-Side-Scanning): siehe
-> [README.md, Abschnitt „Hintergrund"](README.md#hintergrund-warum-ein-tool-wie-renkervault-gegen-chat-kontrolle).
+> Why this architecture was deliberately chosen (keyword "chat control"
+> / mandatory client-side scanning): see
+> [README.md, "Why a tool like RenkerVault?"](README.md#why-a-tool-like-renkervault).
 
-> **Vertiefende Audit-Dokumente:** [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
-> (was Relay/Tor/Cover-Traffic/PQ konkret schützen — und was nicht),
-> [docs/METADATA.md](docs/METADATA.md) (feldweise Analyse, was der Relay
-> aus jedem Envelope sieht), [docs/FINDINGS.md](docs/FINDINGS.md)
-> (strukturierte Liste aller Audit-Befunde mit Schweregrad, Fix und
-> Regressionstest). Automatisierte Sicherheitstests:
-> `client/tests/security/` (39 Tests: Ratchet, Handshake, Vault) und
-> `server/tests/security/` (12 Tests: Relay-Multi-Device-Trust,
-> Auth-Flow, bounded storage) — `npm test` in `client/` bzw. `server/`.
+> **In-depth audit documents:** [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
+> (what relay/Tor/cover-traffic/PQ concretely protect — and what not),
+> [docs/METADATA.md](docs/METADATA.md) (field-by-field analysis of what the relay
+> sees from each envelope), [docs/FINDINGS.md](docs/FINDINGS.md)
+> (a structured list of all audit findings with severity, fix, and
+> regression test). Automated security tests:
+> `client/tests/security/` (39 tests: ratchet, handshake, vault) and
+> `server/tests/security/` (12 tests: relay multi-device trust,
+> auth flow, bounded storage) — `npm test` in `client/` and `server/` respectively.
 
 ---
 
-## 1. Was ist wirklich Ende-zu-Ende-verschlüsselt?
+## 1. What is really end-to-end encrypted?
 
-| Bereich | Schutz | Details |
+| Area | Protection | Details |
 |---|---|---|
-| 1:1-Chats | ✅ E2E, Double Ratchet | X3DH-Hybrid-Handshake (X25519 + ML-KEM-768, mit One-Time-Prekey wenn verfügbar, siehe Abschnitt 4b) → Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM). Jede Nachricht eigener Message-Key (PFS); jeder Antwort-Roundtrip frischer Root-Key (Post-Compromise Security). Ratchet-Implementierung im Security-Audit vom 10.08.2026 geprüft und gehärtet (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-001/002). |
-| Gruppen | ⚠️ E2E, aber strukturell schwächer als 1:1 | Zufälliger 256-Bit-Gruppenschlüssel pro Epoche; jede Mitgliederänderung erzeugt verifiziert eine neue Epoche (Entfernte lesen nichts Späteres). **Ehrliche Grenze (Audit 10.08.2026):** kein Forward-Secrecy-Schutz *innerhalb* einer Epoche (ein kompromittierter Epoch-Key entschlüsselt alle Nachrichten der Epoche rückwirkend) und keine kryptographische Absender-Authentifizierung zwischen Mitgliedern. Für kleine, gegenseitig vertrauende Gruppen geeignet, nicht für Szenarien mit potenziell böswilligen Mitgliedern. Details + Migrationsempfehlung (Sender-Keys/MLS): [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/FINDINGS.md](docs/FINDINGS.md) FINDING-010. |
-| Kanäle | ⚠ Verschlüsselt, aber schwächeres Vertrauensmodell | Kanal-Epoch-Key; Owner/Admins senden. Der Sender kennt zwangsläufig die Abonnentenliste; bei großen Kanälen ist der Schlüssel breit verteilt — eher „verschlüsselter Broadcast" als vertrauliche Kommunikation. |
-| Lokale Datenbank | ✅ At-Rest | Argon2id (Passphrase) → KEK → wrappt zufälligen Master-Key → AES-256-GCM über den gesamten Zustand. HMAC-SHA256 über den Ciphertext als Manipulationsschutz. Kein Klartext auf der Platte. |
-| Relay-Server | ✅ Inhaltsblind (kein Klartext) — **kein** Zero-Knowledge | Sieht nie Klartext, aber sehr wohl Metadaten: Konto-IDs, öffentliche Schlüssel, Geräte-Metadaten, Verbindungs-/Zeitmuster, opake Envelopes. Auth per Ed25519-Challenge-Response (passwortlos). |
+| 1:1 chats | ✅ E2E, Double Ratchet | X3DH hybrid handshake (X25519 + ML-KEM-768, with a one-time prekey when available, see section 4b) → Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM). Every message has its own message key (PFS); every reply round trip a fresh root key (post-compromise security). The ratchet implementation was checked and hardened in the security audit of 2026-08-10 (see [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-001/002). |
+| Groups | ⚠️ E2E, but structurally weaker than 1:1 | A random 256-bit group key per epoch; every member change verifiably creates a new epoch (removed members read nothing later). **Honest limit (audit 2026-08-10):** no forward-secrecy protection *within* an epoch (a compromised epoch key decrypts all messages of the epoch retroactively) and no cryptographic sender authentication between members. Suitable for small, mutually trusting groups, not for scenarios with potentially malicious members. Details + migration recommendation (sender keys/MLS): [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/FINDINGS.md](docs/FINDINGS.md) FINDING-010. |
+| Channels | ⚠ Encrypted, but a weaker trust model | A channel epoch key; owner/admins send. The sender necessarily knows the subscriber list; for large channels the key is widely distributed — more "encrypted broadcast" than confidential communication. |
+| Local database | ✅ At-rest | Argon2id (passphrase) → KEK → wraps a random master key → AES-256-GCM over the entire state. HMAC-SHA256 over the ciphertext as tamper protection. No plaintext on disk. |
+| Relay server | ✅ Content-blind (no plaintext) — **not** zero-knowledge | Never sees plaintext, but does see metadata: account IDs, public keys, device metadata, connection/timing patterns, opaque envelopes. Auth via Ed25519 challenge-response (passwordless). |
 
-## 2. Einbruchsalarm-System (Kernfeature)
+## 2. Duress-alarm system (core feature)
 
-- **Brute-Force:** 5 fehlgeschlagene Entsperr-/Anmeldeversuche in kurzer Zeit →
-  60 s Lockout + roter Vollbild-Alarm + Eintrag im Security-Log. Serverseitig
-  identische Logik im Relay (Rate-Limit 30 msg/s pro Socket, Lockout-Broadcast
-  an alle Geräte des Kontos).
-- **Neue Geräte:** Jedes weitere Gerät ist zunächst `untrusted` und erhält
-  weder die Offline-Warteschlange noch live zugestellte Nachrichten, bis es
-  von einem bereits bestätigten Gerät manuell freigeschaltet wird. Meldet
-  sich eine bekannte Geräte-ID mit anderem Schlüssel → `KEY_MISMATCH`-Alarm
-  (möglicher Impersonations-Versuch). **Serverseitig durchgesetzt** seit dem
-  Security-Audit vom 10.08.2026 — zuvor war die Bestätigungspflicht nur
-  Client-UI-Konvention, der Relay selbst prüfte weder bei Live-Zustellung
-  noch bei `approve-device`/`revoke-device` den Trust-Status des Aufrufers
-  (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-004/005/006 — P0,
-  behoben, mit Regressionstests in `server/tests/security/relay.test.ts`).
-- **DB-Manipulation:** HMAC-Prüfung beim Entsperren und auf Abruf. Fehlschlag
-  → Alarm + optionaler Auto-Lockdown (nur Alarm-Screen sichtbar).
-- **Duress-PIN:** separater Argon2id-Hash; die PIN öffnet eine leere
-  Fake-Ansicht, der echte Tresor bleibt verschlossen. Es wird bewusst KEIN
-  sichtbares Ereignis protokolliert.
+- **Brute force:** 5 failed unlock/login attempts in a short time →
+  60 s lockout + red full-screen alarm + entry in the security log. Server-side
+  identical logic in the relay (rate limit 30 msg/s per socket, lockout broadcast
+  to all devices of the account).
+- **New devices:** every additional device is `untrusted` at first and receives
+  neither the offline queue nor live-delivered messages until it
+  is manually approved by an already-confirmed device. If
+  a known device ID reports with a different key → `KEY_MISMATCH` alarm
+  (possible impersonation attempt). **Enforced server-side** since the
+  security audit of 2026-08-10 — before that, the confirmation requirement was only
+  a client-UI convention; the relay itself checked neither on live delivery
+  nor on `approve-device`/`revoke-device` the trust status of the caller
+  (see [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-004/005/006 — P0,
+  fixed, with regression tests in `server/tests/security/relay.test.ts`).
+- **DB tampering:** HMAC check on unlock and on retrieval. Failure
+  → alarm + optional auto-lockdown (only the alarm screen visible).
+- **Duress PIN:** a separate Argon2id hash; the PIN opens an empty
+  fake view, the real vault stays locked. Deliberately NO
+  visible event is logged.
 
-## 3. Nachrichten-Interaktionen: Metadaten-Transparenz
+## 3. Message interactions: metadata transparency
 
-Antworten, Bearbeiten, Löschen, Weiterleiten, Reaktionen und Präsenz sind
-**Anwendungs-Events**, die wie normale Nachrichten über bestehende 1:1-/
-Gruppen-Sitzungen laufen (Ratchet- bzw. Epoch-Key-verschlüsselt) — kein
-separater Server-Mechanismus. Zwei bewusste Kompromisse dabei:
+Replies, edits, deletes, forwards, reactions, and presence are
+**application events** that run like normal messages over existing 1:1/
+group sessions (ratchet- or epoch-key-encrypted) — no
+separate server mechanism. Two deliberate trade-offs in this:
 
-- **Antwort-Zitat und „Weitergeleitet von"-Name sind Envelope-Metadaten**,
-  keine verschlüsselte Nutzlast — genau wie `msgId`, `fromName` und
-  Dateiname/-größe, die der Relay ohnehin schon sieht (siehe Abschnitt 1).
-  Emoji-Reaktion und neuer Bearbeitungstext dagegen laufen wie normale
-  Nachrichten durch AES-GCM. Für echte Vertraulichkeit müsste auch die
-  Zitat-Vorschau in die Ciphertext-Nutzlast wandern.
-- **Präsenz ("online"/"zuletzt gesehen") ist Best-Effort und opt-in-artig
-  implizit:** Der Relay speichert selbst KEINE Kontaktliste oder Präsenz —
-  Clients senden sich Online-/Offline-Signale direkt gegenseitig über
-  bestehende 1:1-Sitzungen. Offline-Signale beim Schließen der App/des Tabs
-  sind nicht garantiert zustellbar (kein `beforeunload`-Warten auf Zustellung).
-- **Angeheftete Nachrichten sind rein lokal** (nicht zwischen Geräten/
-  Kontakten synchronisiert) — eine bewusste Vereinfachung gegenüber Telegram,
-  wo Pins chatweit sichtbar sind.
-- **Kein automatischer Linkvorschau-Abruf.** URLs werden nur klickbar
-  gemacht, NIE serverseitig oder clientseitig automatisch abgerufen — das
-  Nachladen von Metadaten einer verlinkten Seite würde die IP-Adresse und den
-  Lesezeitpunkt an einen Dritten (den Linkbetreiber) leaken, unabhängig von
-  der Ende-zu-Ende-Verschlüsselung des Chats selbst. Bewusste Abweichung von
-  Telegrams Standardverhalten zugunsten der Privatsphäre.
-- **Kanäle bleiben Demo-only** (siehe Abschnitt „Was ist wirklich verschlüsselt");
-  ein Aufrufzähler für Broadcast-Nachrichten wurde daher nicht implementiert,
-  da es ohne echte Mehrfachnutzer-Infrastruktur nichts Reales zu zählen gäbe.
+- **The reply quote and the "forwarded from" name are envelope metadata**,
+  not encrypted payload — just like `msgId`, `fromName`, and the
+  file name/size that the relay already sees anyway (see section 1).
+  An emoji reaction and the new edit text, by contrast, run like normal
+  messages through AES-GCM. For true confidentiality, the
+  quote preview would also have to move into the ciphertext payload.
+- **Presence ("online"/"last seen") is best-effort and implicitly opt-in-like:**
+  the relay itself stores NO contact list or presence —
+  clients send each other online/offline signals directly over
+  existing 1:1 sessions. Offline signals on closing the app/tab
+  are not guaranteed deliverable (no `beforeunload` wait for delivery).
+- **Pinned messages are purely local** (not synced between devices/
+  contacts) — a deliberate simplification compared to Telegram,
+  where pins are visible chat-wide.
+- **No automatic link-preview fetch.** URLs are only made clickable,
+  NEVER fetched automatically server- or client-side — reloading
+  the metadata of a linked page would leak the IP address and the
+  read time to a third party (the link operator), independent of
+  the end-to-end encryption of the chat itself. A deliberate deviation from
+  Telegram's default behavior in favor of privacy.
+- **Channels remain demo-only** (see the "What is really encrypted" section);
+  a view counter for broadcast messages was therefore not implemented,
+  since without real multi-user infrastructure there would be nothing real to count.
 
-## 3a. Sealed Sender für 1:1-Folgenachrichten
+## 3a. Sealed sender for 1:1 follow-up messages
 
-Ab der zweiten Nachricht einer bestehenden 1:1-Sitzung leiten beide Seiten
-unabhängig voneinander ein kurzes Tag aus dem gemeinsamen Sitzungsgeheimnis
-ab (`net/realchat.ts`: `deriveSessionTag`, HKDF über den Ratchet-Shared-
-Secret). Der Client schickt dieses Tag statt sich auf die Konto-ID zu
-verlassen; der Relay routet danach und schreibt die Konto-ID des Absenders
-**nicht** mehr in die zugestellte bzw. zwischengespeicherte Nachricht
-(`server/src/index.js`, Fall `'send'`) — der Empfänger löst sie stattdessen
-selbst über `resolvePeerByTag` auf.
+From the second message of an existing 1:1 session on, both sides
+independently derive a short tag from the shared session secret
+(`net/realchat.ts`: `deriveSessionTag`, HKDF over the ratchet shared
+secret). The client sends this tag instead of relying on the account ID;
+the relay routes by it and **no longer** writes the sender's account ID
+into the delivered or cached message
+(`server/src/index.js`, case `'send'`) — the recipient instead resolves it
+itself via `resolvePeerByTag`.
 
-**Ehrliche Grenze:** Der Relay-*Betreiber* kennt den Absender einer
-Nachricht trotzdem, weil das `send`-Kommando über eine bereits
-authentifizierte, auf die Konto-ID lautende WebSocket-Verbindung eintrifft
-— das lässt sich ohne ein System anonymer Zugangs-Credentials (blinde
-Signaturen o. Ä.) nicht vermeiden und ist bewusst nicht implementiert
-(deutlich größerer kryptographischer Aufwand, siehe Abschnitt 5). Was dieses
-Feature tatsächlich bringt: Die Konto-ID landet nicht mehr als Klartext in
-der zugestellten/zwischengespeicherten Nachricht selbst — ein Datenabzug
-der Offline-Queue oder ein Log-Leck würde für Folgenachrichten keinen
-Absender mehr preisgeben, selbst wenn der Betreiber live zusehen könnte.
-Beim allerersten Kontakt (X3DH-Envelope) kennt die Gegenseite noch kein Tag
-und braucht die Konto-ID zwingend, um überhaupt antworten zu können — dort
-bleibt sie wie bisher server-sichtbar. Verifiziert per echtem
-Zwei-Browser-Test (erste Nachricht `from` sichtbar, zweite `from: null`,
-Empfänger löst trotzdem korrekt auf).
+**Honest limit:** the relay *operator* still knows the sender of a
+message, because the `send` command arrives over an already
+authenticated WebSocket connection tied to the account ID
+— this cannot be avoided without a system of anonymous access credentials (blind
+signatures or similar) and is deliberately not implemented
+(a considerably larger cryptographic effort, see section 5). What this
+feature actually achieves: the account ID no longer lands as plaintext in
+the delivered/cached message itself — a data extraction
+of the offline queue or a log leak would no longer reveal a sender
+for follow-up messages, even if the operator could watch live.
+On the very first contact (X3DH envelope), the counterpart does not yet know a tag
+and mandatorily needs the account ID to be able to reply at all — there
+it stays server-visible as before. Verified via a real
+two-browser test (first message `from` visible, second `from: null`,
+the recipient still resolves it correctly).
 
-## 4. Bekannte Grenzen des Prototyps (bewusste Kompromisse)
+## 4. Known limits of the prototype (deliberate trade-offs)
 
-1. **Double-Ratchet-Komposition ist nicht auditiert.** Primitive sind
-   auditiert (@noble, hash-wasm, WebCrypto), die Protokoll-Komposition in
-   `ratchet.ts` folgt der Signal-Spezifikation, wurde aber nicht extern
-   geprüft. Es gibt derzeit keine gepflegte auditierte Signal-Browser-Library.
-2. ~~X3DH-lite ohne One-Time-Prekeys~~ **Behoben:** Jede Identität hält einen
-   Bestand von 25 Einmal-Prekeys (`net/realchat.ts`: `topUpOneTimePrekeys`),
-   die beim Relay hinterlegt werden. Ein `lookup` mit `forHandshake=true`
-   verbraucht genau EINEN davon und entfernt ihn serverseitig sofort aus dem
-   Bestand (`server/src/index.js`, Fall `'lookup'`) — reine Info-Lookups
-   (`forHandshake=false`, z. B. Kontaktnamen auffrischen) verbrauchen keinen.
-   Der Handshake nutzt dann drei statt zwei DH-Berechnungen
-   (`crypto/ratchet.ts`: `handshakeInitiator`/`-Responder`, dritter Term nur
-   bei vorhandenem Einmal-Prekey, per eigenem HKDF-Info-String von der
-   2-DH-Variante unterschieden). Ist der Bestand einer Gegenseite erschöpft,
-   fällt der Handshake automatisch und unauffällig auf die 2-DH-Variante
-   zurück (Signed Prekey allein) — funktional identisch zu vorher, aber ohne
-   Fehlerfall. Verifiziert per Browser-Test (zwei echte Clients) und
-   isoliertem Server-Test (Einmalausgabe, kein Verbrauch bei Info-Lookup,
-   sauberes `null` bei leerem Bestand).
-3. **Demo-Peers laufen im selben Browser-Prozess** (Nadja/Milan/Brandt/
-   Werkstatt Nord/Bulletin) — echte Krypto, aber simulierte Gegenüber, nur zur
-   Vorführung. Echte Kontakte/Gruppen (über „Kontakt hinzufügen") laufen
-   dagegen wirklich über den Relay zwischen unabhängigen Client-Instanzen,
-   inklusive persistierter Sitzungen (siehe `net/realchat.ts`).
-4. **Demo-Ratchet-Sitzungszustand wird NICHT persistiert** (bewusst — jeder
-   Neustart handelt neu aus, Safety Numbers bleiben stabil). **Echte
-   Sitzungen und Gruppenschlüssel dagegen WERDEN persistiert** (verschlüsselt
-   im Vault), da sonst zwei echte Gesprächspartner nach einem Neustart
-   auseinanderlaufen würden.
-5. **Memory-/Storage-Härtung (Audit 10.08.2026):** Der Master-Key wird beim
-   Sperren/Zerstören des Vaults jetzt explizit im JS-Heap mit Nullen
-   überschrieben (`crypto/vault.ts`, `zero()`), bevor die Referenz fällt;
-   `destroyVault()` überschreibt den `localStorage`-Slot dreimal mit
-   Zufallsdaten, bevor er entfernt wird. **Ehrlich dokumentierte Grenze:**
-   Keine Garantie — V8s Garbage Collector und die WebCrypto-Implementierung
-   können eigene, aus JS nicht erreichbare Kopien halten, und die
-   Storage-Engine (LevelDB/SQLite-Backing) kann durch Compaction weiterhin
-   ältere Kopien enthalten. Details: [docs/FINDINGS.md](docs/FINDINGS.md),
+1. **The Double-Ratchet composition is not audited.** The primitives are
+   audited (@noble, hash-wasm, WebCrypto), the protocol composition in
+   `ratchet.ts` follows the Signal specification but was not externally
+   reviewed. There is currently no maintained audited Signal browser library.
+2. ~~X3DH-lite without one-time prekeys~~ **Fixed:** every identity keeps a
+   stock of 25 one-time prekeys (`net/realchat.ts`: `topUpOneTimePrekeys`),
+   deposited with the relay. A `lookup` with `forHandshake=true`
+   consumes exactly ONE of them and removes it server-side immediately from the
+   stock (`server/src/index.js`, case `'lookup'`) — pure info lookups
+   (`forHandshake=false`, e.g. refreshing a contact name) consume none.
+   The handshake then uses three instead of two DH computations
+   (`crypto/ratchet.ts`: `handshakeInitiator`/`-Responder`, the third term only
+   with a present one-time prekey, distinguished from the
+   2-DH variant by its own HKDF info string). If a counterpart's stock is exhausted,
+   the handshake automatically and unobtrusively falls back to the 2-DH variant
+   (signed prekey alone) — functionally identical to before, but without
+   an error case. Verified via a browser test (two real clients) and
+   an isolated server test (one-time issuance, no consumption on info lookup,
+   clean `null` on empty stock).
+3. **Demo peers run in the same browser process** (Nadja/Milan/Brandt/
+   Werkstatt Nord/Bulletin) — real crypto, but simulated counterparts, only for
+   demonstration. Real contacts/groups (via "add contact") run
+   in contrast really over the relay between independent client instances,
+   including persisted sessions (see `net/realchat.ts`).
+4. **Demo ratchet session state is NOT persisted** (deliberate — every
+   restart renegotiates, safety numbers stay stable). **Real
+   sessions and group keys, in contrast, ARE persisted** (encrypted
+   in the vault), since otherwise two real conversation partners would
+   diverge after a restart.
+5. **Memory/storage hardening (audit 2026-08-10):** the master key is now,
+   on locking/destroying the vault, explicitly overwritten with zeros in the JS heap
+   (`crypto/vault.ts`, `zero()`) before the reference drops;
+   `destroyVault()` overwrites the `localStorage` slot three times with
+   random data before removing it. **Honestly documented limit:**
+   no guarantee — V8's garbage collector and the WebCrypto implementation
+   can hold their own copies unreachable from JS, and the
+   storage engine (LevelDB/SQLite backing) can still contain
+   older copies through compaction. Details: [docs/FINDINGS.md](docs/FINDINGS.md),
    FINDING-008/009.
-6. **localStorage statt SQLCipher:** Browser-Prototyp. Das Schlüsselmodell
-   (Argon2id → KEK → Master-Key → AES-GCM + HMAC) ist identisch übertragbar;
-   eine Desktop-Variante (Tauri) sollte SQLCipher + OS-Keychain nutzen.
-   **Bewusst noch nicht umgesetzt** (Härtungs-Roadmap Punkt 8): Das ist keine
-   Kryptografie-Lücke — der Vault-Inhalt ist bereits vollständig AES-GCM-
-   verschlüsselt, unabhängig vom Speicherort. Eine echte Migration bräuchte
-   Rust-SQLite/SQLCipher-Bindings + Tauri-IPC-Kommandos + einen Migrationspfad
-   für bestehende `localStorage`-Tresore, und ließe sich nur an einem
-   tatsächlich gestarteten Tauri-Prozess korrekt verifizieren — nicht ohne
-   diesen Test zu verantworten.
-   ~~Hardware-gebundener Wrap-Layer (Härtungs-Roadmap Punkt 6)~~ — für
-   Windows-Desktop seit diesem Update teilweise umgesetzt: `src-tauri/src/dpapi.rs`
-   kapselt `CryptProtectData`/`CryptUnprotectData` (Windows-DPAPI, an
-   Windows-Benutzerkonto + Gerät gebunden) als Tauri-Kommandos. `crypto/vault.ts`
-   erkennt zur Laufzeit per `isTauri()`, ob eine native Desktop-Umgebung
-   läuft, und legt dann den bereits KEK-gewrappten Master-Key zusätzlich in
-   einer DPAPI-Schicht ab (`dpapiWrapped: true` im Vault-File) — eine
-   kopierte Tresordatei ist auf einem anderen Gerät/Windows-Konto dann
-   selbst mit korrekter Passphrase nicht mehr entschlüsselbar (neuer
-   `UnlockResult`-Grund `device-mismatch`, bewusst NICHT als Fehlversuch in
-   den Brute-Force-Zähler gezählt, da es kein Passphrasen-Problem ist). Im
-   Browser-/Android-Build bleibt das Verhalten unverändert (kein DPAPI
-   verfügbar, `dpapiWrapped: false`, reiner Argon2id-Pfad wie bisher) —
-   vollständig rückwärtskompatibel zu bestehenden Tresoren.
-   **Testabdeckung:** Die native DPAPI-Ebene selbst ist über vier echte
-   `cargo test`-Fälle gegen die tatsächliche Windows-API verifiziert
-   (Rundlauf, kein Klartext im geschützten Blob, Fehlschlag bei
-   Manipulation, Leer-Eingabe). Der Browser-Fallback-Pfad (kein Tauri) ist
-   per echtem End-to-End-Test verifiziert (Erstellen → Sperren →
-   Entsperren). **Nicht verifizierbar in dieser Umgebung:** der vollständige
-   Rundlauf *innerhalb* eines laufenden Tauri-Fensters (natives WebView2-
-   Fenster, von den hier verfügbaren Browser-Automatisierungswerkzeugen
-   nicht ansteuerbar) — vor Produktiveinsatz manuell auf echtem Windows mit
-   `npm run tauri dev` nachzuholen. macOS (Keychain) und Android
-   (Keystore) sind analog denkbar, aber nicht umgesetzt.
-7. **Relay hält Zustand nur im RAM** (Prototyp): Konten/Queues gehen bei
-   Neustart verloren. Produktion: PostgreSQL für Metadaten, persistente
-   verschlüsselte Offline-Queues. **Seit dem Audit vom 10.08.2026 bounded
-   statt unbounded:** eine harte Obergrenze für die Gesamtzahl verwalteter
-   Konten (`MAX_TRACKED_USERS`, 200.000) sowie ein periodischer Sweep
-   (alle 10 Minuten) entfernen abgelaufene Warteschlangen-Einträge (TTL
-   14 Tage) und geräteloses Phantom-Konten — verhindert unbegrenztes
-   Speicherwachstum durch Nachrichten an frei erfundene Ziel-userIds
-   (siehe [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-007). Eine echte
-   Persistenzschicht bleibt trotzdem offen — das bounded-RAM-Verhalten ist
-   eine Absicherung gegen Ressourcenerschöpfung, kein Ersatz für
-   Neustart-Persistenz.
-8. **Metadaten:** Der Relay sieht wer-mit-wem-wann (Routing). ~~Schutz
-   dagegen (Sealed Sender...) ist nicht implementiert~~ — für 1:1-Folge-
-   nachrichten seit diesem Update teilweise umgesetzt (Abschnitt 3a).
-   ~~Padding und Cover-Traffic bleiben offen~~ — seit diesem Update ebenfalls
-   umgesetzt (Abschnitt 4g). Weiterhin offen: Der Relay-*Betreiber* sieht
-   nach wie vor live, welche authentifizierte Verbindung überhaupt eine
-   `send`-Nachricht schickt (Timing des Verbindungsaufbaus selbst), Padding/
-   Cover-Traffic verschleiern nur Größe und Sendehäufigkeit der Nachrichten
-   danach, nicht die Tatsache der Verbindung an sich.
-9. **Web-Auslieferung:** Eine Web-App kann vom Server kompromittiert
-   ausgeliefert werden (malicious JS). Ernsthafter Einsatz braucht signierte
-   Desktop-/Mobile-Builds (Tauri/Capacitor, siehe README „Deployment").
-10. **Argon2id-Parameter** (64 MiB, t=4, siehe `crypto/primitives.ts`) sind ein
-   Kompromiss zwischen Sicherheit und Entsperr-Latenz auf schwächerer
-   Hardware; für einen dedizierten Produktivbetrieb weiter nach OWASP und
-   Ziel-Hardware kalibrieren.
-11. **Kein Schutz gegen kompromittiertes Endgerät.** Malware/Keylogger auf dem
-    Gerät sieht alles — das kann keine E2E-Verschlüsselung verhindern.
-12. **Anhang-/Sprachnachrichtengröße:** 1,2 MB Rohdaten pro Anhang (Prototyp-
-    Obergrenze, siehe `MAX_FILE_BYTES` in `ui/App.tsx` und `MAX_MSG_BYTES` in
-    `server/src/index.js`) — ausreichend für Bilder/kurze Sprachnachrichten,
-    nicht für Videos.
-13. **Relay-Rate-Limiting ist absichtlich einfach gehalten:** Verbindungs-
-    deckel pro IP (20), Auth-Timeout (15 s), ein Pro-Socket-Nachrichtenlimit
-    (30/s) sowie zwei zusätzliche, **kontobezogene** Limits (unabhängig von
-    der Anzahl gleichzeitig verbundener Geräte desselben Kontos) — ein
-    Sende-Limit (300 Nachrichten/Minute, verhindert das Fluten der
-    Warteschlange eines einzelnen Ziel-Kontos) und ein Handshake-Lookup-Limit
-    (20 pro 5 Minuten, verhindert gezieltes Leerräumen des One-Time-Prekey-
-    Bestands eines Opfers, siehe Abschnitt 4 Punkt 2) — schützen vor
-    trivialer Ressourcenerschöpfung durch einen einzelnen Angreifer. Es gibt
-    weiterhin keinen Schutz gegen verteilte Angriffe (DDoS) aus vielen IPs —
-    dafür ist ein vorgelagerter Reverse-Proxy/CDN mit DDoS-Schutz nötig.
-    Konkrete, gestufte Optionen (ufw-Connection-Limit, fail2ban-Jail,
-    CDN-Vorschaltung) jetzt in `deploy/DEPLOYMENT.md`, Abschnitt
-    „DDoS-Schutz" dokumentiert; optionaler Caddy-Rate-Limit-Block in
-    `deploy/Caddyfile` (braucht einen `xcaddy`-Custom-Build mit
-    `caddy-ratelimit`-Plugin, vanilla Caddy hat kein eingebautes
-    Rate-Limiting).
+6. **localStorage instead of SQLCipher:** a browser prototype. The key model
+   (Argon2id → KEK → master key → AES-GCM + HMAC) is transferable identically;
+   a desktop variant (Tauri) should use SQLCipher + OS keychain.
+   **Deliberately not yet implemented** (hardening roadmap point 8): this is not a
+   cryptography gap — the vault content is already fully AES-GCM-
+   encrypted, independent of the storage location. A real migration would need
+   Rust-SQLite/SQLCipher bindings + Tauri IPC commands + a migration path
+   for existing `localStorage` vaults, and could only be verified correctly on an
+   actually started Tauri process — not something to take responsibility for without
+   that test.
+   ~~Hardware-bound wrap layer (hardening roadmap point 6)~~ — for
+   Windows desktop partly implemented since this update: `src-tauri/src/dpapi.rs`
+   wraps `CryptProtectData`/`CryptUnprotectData` (Windows DPAPI, bound to the
+   Windows user account + device) as Tauri commands. `crypto/vault.ts`
+   detects at runtime via `isTauri()` whether a native desktop environment
+   is running, and then additionally places the already-KEK-wrapped master key in
+   a DPAPI layer (`dpapiWrapped: true` in the vault file) — a
+   copied vault file is then, on another device/Windows account,
+   no longer decryptable even with the correct passphrase (a new
+   `UnlockResult` reason `device-mismatch`, deliberately NOT counted as a failed
+   attempt in the brute-force counter, since it is not a passphrase problem). In the
+   browser/Android build the behavior stays unchanged (no DPAPI
+   available, `dpapiWrapped: false`, the pure Argon2id path as before) —
+   fully backward-compatible with existing vaults.
+   **Test coverage:** the native DPAPI layer itself is verified via four real
+   `cargo test` cases against the actual Windows API
+   (round trip, no plaintext in the protected blob, failure on
+   tampering, empty input). The browser fallback path (no Tauri) is
+   verified via a real end-to-end test (create → lock →
+   unlock). **Not verifiable in this environment:** the full
+   round trip *inside* a running Tauri window (native WebView2
+   window, not controllable by the browser-automation tools available here)
+   — to be caught up manually on real Windows with
+   `npm run tauri dev` before production use. macOS (Keychain) and Android
+   (Keystore) are analogously conceivable but not implemented.
+7. **The relay holds state only in RAM** (prototype): accounts/queues are lost on
+   restart. Production: PostgreSQL for metadata, persistent
+   encrypted offline queues. **Since the audit of 2026-08-10, bounded
+   instead of unbounded:** a hard upper limit for the total number of managed
+   accounts (`MAX_TRACKED_USERS`, 200,000) as well as a periodic sweep
+   (every 10 minutes) removes expired queue entries (TTL
+   14 days) and device-less phantom accounts — prevents unbounded
+   memory growth from messages to freely invented target userIds
+   (see [docs/FINDINGS.md](docs/FINDINGS.md), FINDING-007). A real
+   persistence layer nevertheless remains open — the bounded-RAM behavior is
+   a safeguard against resource exhaustion, not a substitute for
+   restart persistence.
+8. **Metadata:** the relay sees who-with-whom-when (routing). ~~Protection
+   against it (sealed sender...) is not implemented~~ — for 1:1 follow-up
+   messages partly implemented since this update (section 3a).
+   ~~Padding and cover traffic remain open~~ — also implemented since this update
+   (section 4g). Still open: the relay *operator* still sees
+   live which authenticated connection sends a
+   `send` message at all (the timing of the connection setup itself); padding/
+   cover traffic obscure only the size and send frequency of the messages
+   afterwards, not the fact of the connection itself.
+9. **Web delivery:** a web app can be delivered compromised by the
+   server (malicious JS). Serious use needs signed
+   desktop/mobile builds (Tauri/Capacitor, see README "Deployment").
+10. **Argon2id parameters** (64 MiB, t=4, see `crypto/primitives.ts`) are a
+   trade-off between security and unlock latency on weaker
+   hardware; for a dedicated production deployment, calibrate further per OWASP and
+   target hardware.
+11. **No protection against a compromised endpoint.** Malware/keyloggers on the
+    device see everything — no E2E encryption can prevent that.
+12. **Attachment/voice-message size:** 1.2 MB of raw data per attachment (a prototype
+    upper limit, see `MAX_FILE_BYTES` in `ui/App.tsx` and `MAX_MSG_BYTES` in
+    `server/src/index.js`) — sufficient for images/short voice messages,
+    not for videos.
+13. **Relay rate limiting is deliberately kept simple:** a connection
+    cap per IP (20), an auth timeout (15 s), a per-socket message limit
+    (30/s) plus two additional, **account-based** limits (independent of
+    the number of simultaneously connected devices of the same account) — a
+    send limit (300 messages/minute, prevents flooding the
+    queue of a single target account) and a handshake-lookup limit
+    (20 per 5 minutes, prevents targeted draining of a victim's one-time-prekey
+    stock, see section 4 point 2) — protect against
+    trivial resource exhaustion by a single attacker. There is
+    still no protection against distributed attacks (DDoS) from many IPs —
+    for that an upstream reverse proxy/CDN with DDoS protection is needed.
+    Concrete, tiered options (ufw connection limit, fail2ban jail,
+    CDN fronting) are now documented in `deploy/DEPLOYMENT.md`, section
+    "DDoS protection"; an optional Caddy rate-limit block in
+    `deploy/Caddyfile` (needs an `xcaddy` custom build with the
+    `caddy-ratelimit` plugin; vanilla Caddy has no built-in
+    rate limiting).
 
-## 4a. TLS / Hosting für andere erreichbar machen
+## 4a. TLS / hosting to make it reachable for others
 
-Der Relay unterstützt jetzt sowohl natives TLS (`TLS_CERT_FILE`/`TLS_KEY_FILE`)
-als auch den empfohlenen Betrieb hinter einem Reverse-Proxy (Caddy mit
-automatischem Let's-Encrypt-Zertifikat). Vollständige Schritt-für-Schritt-
-Anleitung inklusive systemd-Hardening: [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
-**Wichtig:** `ws://` zu einem NICHT-lokalen Host überträgt den initialen
-Handshake und alle Routing-Metadaten im Klartext — für alles außer
-`localhost` ist `wss://` mit gültigem Zertifikat zwingend. Die App warnt
-davor jetzt auch aktiv in den Einstellungen.
+The relay now supports both native TLS (`TLS_CERT_FILE`/`TLS_KEY_FILE`)
+and the recommended operation behind a reverse proxy (Caddy with an
+automatic Let's Encrypt certificate). A full step-by-step
+guide including systemd hardening: [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
+**Important:** `ws://` to a NON-local host transmits the initial
+handshake and all routing metadata in plaintext — for anything other than
+`localhost`, `wss://` with a valid certificate is mandatory. The app now warns
+about this actively in the settings too.
 
-**TLS-Zertifikats-Pinning (Härtungs-Roadmap Punkt 7):** Für die
-Android-Variante gibt es jetzt ein einkommentierbares `<pin-set>`-Template
-in `android/app/src/main/res/xml/network_security_config.xml`. Standardmäßig
-NICHT aktiv, weil Pinning eine fest einkompilierte Domain voraussetzt,
-RenkerVaults Relay-Adresse aber in den Einstellungen frei wählbar ist —
-sinnvoll nur für Betreiber, die eine eigene, gebrandete App-Variante mit
-genau einem festen Relay ausliefern (Anleitung inkl. `openssl`-Befehl zum
-Pin-Berechnen direkt in der Datei). Für den Browser-Prototyp und die
-Tauri-Desktop-Variante (nutzt das System-WebView) existiert keine
-öffentliche API für TLS-Pinning — eine Plattformgrenze, kein fehlendes
-Feature dieses Projekts.
+**TLS certificate pinning (hardening roadmap point 7):** for the
+Android variant there is now a commentable `<pin-set>` template
+in `android/app/src/main/res/xml/network_security_config.xml`. NOT active by default,
+because pinning requires a hard-compiled domain, but
+RenkerVault's relay address is freely selectable in the settings —
+sensible only for operators who ship their own branded app variant with
+exactly one fixed relay (a guide incl. the `openssl` command to
+compute the pin is directly in the file). For the browser prototype and the
+Tauri desktop variant (which uses the system WebView) there is no
+public API for TLS pinning — a platform limit, not a missing
+feature of this project.
 
-Für maximale IP-Anonymität (weder der Server noch ein Netzwerk-Beobachter
-sieht die echte IP-Adresse der Gesprächspartner) gibt es zusätzlich
-**Weg 3: Tor Hidden Service** (`deploy/torrc.snippet` +
-[deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md)) — der Relay läuft dann
-ausschließlich unter einer `.onion`-Adresse, komplett ohne öffentlichen
-DNS-Namen oder offenen Port.
+For maximum IP anonymity (neither the server nor a network observer
+sees the real IP address of the conversation partners) there is additionally
+**path 3: Tor hidden service** (`deploy/torrc.snippet` +
+[deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md)) — the relay then runs
+exclusively under an `.onion` address, entirely without a public
+DNS name or open port.
 
-## 4b. Schutz gegen Quantencomputer (Post-Quantum-Hybrid-Handshake)
+## 4b. Protection against quantum computers (post-quantum hybrid handshake)
 
-Der initiale Schlüsselaustausch (X3DH-lite) ist seit diesem Update
-**hybrid**: klassisches X25519-ECDH **plus** ML-KEM-768 (FIPS 203, vormals
-Kyber; auditierte Implementierung aus `@noble/post-quantum`), beide
-Shared Secrets zusammen durch HKDF-SHA256 gemischt (`crypto/pq.ts`,
-`crypto/ratchet.ts`). Das ist derselbe Ansatz, den Signal unter dem Namen
-„PQXDH" produktiv einsetzt.
+The initial key exchange (X3DH-lite) is, since this update,
+**hybrid**: classical X25519 ECDH **plus** ML-KEM-768 (FIPS 203, formerly
+Kyber; an audited implementation from `@noble/post-quantum`), both
+shared secrets mixed together through HKDF-SHA256 (`crypto/pq.ts`,
+`crypto/ratchet.ts`). This is the same approach that Signal uses in production
+under the name "PQXDH".
 
-- **Warum überhaupt, wenn heutige Quantencomputer das noch nicht können?**
-  Wegen „Harvest Now, Decrypt Later" (HNDL): ein Angreifer kann schon heute
-  mitgeschnittenen Ciphertext speichern und erst in einigen Jahren mit einem
-  ausreichend großen Quantencomputer entschlüsseln. Der Handshake muss also
-  *heute* quantensicher sein, damit Nachrichten von heute auch in zehn
-  Jahren geschützt bleiben.
-- **Was ist NICHT PQ-geschützt:** Nur der Erstkontakt-Handshake nutzt ML-KEM.
-  Die fortlaufenden Double-Ratchet-Schritte danach basieren weiterhin auf
-  klassischem X25519-ECDH (wie bei Signal auch) — das ist eine bewusste,
-  branchenübliche Grenze, kein Versehen. Ein Vollschutz des gesamten
-  Ratchets gegen Quantenangriffe ist derzeit kein etablierter Standard.
-- **Selbst wenn X25519 künftig gebrochen würde**, bliebe der Erstkontakt
-  durch ML-KEM-768 sicher, solange dessen mathematische Annahme
-  (Module-LWE) hält — daher „hybrid": es reicht, dass *eines* der beiden
-  Verfahren hält.
-- Verifiziert per echtem Zwei-Browser-Test über den Relay (siehe Abschnitt 1).
+- **Why at all, if today's quantum computers cannot do this yet?**
+  Because of "harvest now, decrypt later" (HNDL): an attacker can already today
+  store recorded ciphertext and only decrypt it in some years with a
+  sufficiently large quantum computer. The handshake must therefore be
+  quantum-safe *today*, so that today's messages stay protected in ten
+  years too.
+- **What is NOT PQ-protected:** only the first-contact handshake uses ML-KEM.
+  The ongoing Double-Ratchet steps afterwards still rely on
+  classical X25519 ECDH (as in Signal too) — a deliberate,
+  industry-standard limit, not an oversight. Full protection of the entire
+  ratchet against quantum attacks is currently not an established standard.
+- **Even if X25519 were broken in the future**, the first contact would stay
+  secure through ML-KEM-768, as long as its mathematical assumption
+  (module-LWE) holds — hence "hybrid": it suffices that *one* of the two
+  schemes holds.
+- Verified via a real two-browser test over the relay (see section 1).
 
-## 4c. Sitzung verbrennen (sofortige, unwiderrufliche Löschung)
+## 4c. Burn session (immediate, irreversible deletion)
 
-Jeder Chat hat einen 🔥-Button (Doppelklick zum Bestätigen), der sofort und
-unwiderruflich den kompletten lokalen Nachrichtenverlauf löscht. Bei echten
-1:1-Kontakten wird zusätzlich die Verschlüsselungssitzung (Ratchet-Zustand)
-und der Kontakt selbst entfernt — ein erneuter Kontakt erfordert einen
-komplett neuen Handshake, es bleibt nichts von der alten Sitzung übrig.
-Das entspricht dem „als wäre es nie passiert"-Prinzip von OnionShare/Tor:
-nach dem Verbrennen existiert kein Beweis mehr, dass die Konversation
-stattgefunden hat (abgesehen davon, dass der Relay ohnehin nur Metadaten,
-nie Klartext, sieht — siehe Abschnitt 1).
+Every chat has a 🔥 button (double-click to confirm) that immediately and
+irreversibly deletes the complete local message history. For real
+1:1 contacts, the encryption session (ratchet state)
+and the contact itself are additionally removed — a renewed contact requires a
+completely new handshake, nothing of the old session is left over.
+This corresponds to the "as if it never happened" principle of OnionShare/Tor:
+after burning, no proof exists anymore that the conversation
+took place (apart from the fact that the relay only ever sees metadata,
+never plaintext — see section 1).
 
-## 4d. Warum es KEIN One-Time-Pad und KEINEN „Quanten-Zufallsgenerator" gibt
+## 4d. Why there is NO one-time pad and NO "quantum random generator"
 
-Diese beiden Konzepte wurden bewusst geprüft und NICHT implementiert —
-hier die ehrlichen Gründe, statt sie stillschweigend weg zu lassen:
+These two concepts were deliberately examined and NOT implemented —
+here the honest reasons, instead of silently omitting them:
 
-- **One-Time-Pad (OTP):** mathematisch perfekt sicher (Shannon), aber nur
-  unter einer Bedingung, die in der Praxis fast nie eingehalten wird: der
-  Schlüssel muss genau so lang wie die Nachricht sein, **wirklich** zufällig,
-  und darf **kein einziges Mal** wiederverwendet werden. Für Chat-Nutzung
-  (potenziell beliebig viele Nachrichten) müsste vorab eine riesige Menge
-  Schlüsselmaterial sicher ausgetauscht werden (z. B. persönlich per USB-
-  Stick, wie im Video als „Codebook" beschrieben) — und die geringste
-  Wiederverwendung eines Blocks bricht die gesamte Sicherheit. Der
-  Double-Ratchet-Ansatz, den RenkerVault stattdessen nutzt, erreicht einen
-  in der Praxis vergleichbaren Schutz (jede Nachricht eigener Schlüssel,
-  siehe Abschnitt 1), ohne das Schlüsselaustausch-Problem des OTP — deshalb
-  keine OTP-Option in der App.
-- **„Quanten-Zufallsgenerator" (QRNG):** Ein echter QRNG braucht spezielle
-  Hardware (z. B. Quanten-Rauschen einer Photodiode) und lässt sich nicht in
-  Software/im Browser realisieren — jede Software, die behauptet,
-  „Quanten-Zufall" zu erzeugen, ohne solche Hardware auszulesen, macht eine
-  falsche Behauptung. RenkerVault nutzt stattdessen `crypto.getRandomValues()`
-  (ein kryptografisch sicherer Pseudozufallsgenerator, CSPRNG), was der
-  korrekte und in der Kryptografie-Praxis (inkl. Signal, TLS, etc.)
-  Standardansatz ist. Es besteht kein bekannter praktischer Sicherheitsgewinn
-  durch echten Quantenzufall gegenüber einem CSPRNG für diesen Einsatzzweck.
+- **One-time pad (OTP):** mathematically perfectly secure (Shannon), but only
+  under a condition that is almost never met in practice: the
+  key must be exactly as long as the message, **truly** random,
+  and must be reused **not even once**. For chat use
+  (potentially arbitrarily many messages), a huge amount of
+  key material would have to be securely exchanged in advance (e.g. in person via a USB
+  stick, as described in the video as a "codebook") — and the slightest
+  reuse of a block breaks the entire security. The
+  Double-Ratchet approach that RenkerVault uses instead achieves a
+  protection comparable in practice (every message its own key,
+  see section 1), without the key-exchange problem of the OTP — hence
+  no OTP option in the app.
+- **"Quantum random generator" (QRNG):** a true QRNG needs special
+  hardware (e.g. the quantum noise of a photodiode) and cannot be realized in
+  software/in the browser — any software claiming to generate
+  "quantum randomness" without reading such hardware makes a
+  false claim. RenkerVault instead uses `crypto.getRandomValues()`
+  (a cryptographically secure pseudo-random generator, CSPRNG), which is the
+  correct and, in cryptographic practice (incl. Signal, TLS, etc.),
+  standard approach. There is no known practical security gain
+  from true quantum randomness over a CSPRNG for this purpose.
 
-## 4e. Kompatibilität mit gehärteten/alternativen Betriebssystemen
+## 4e. Compatibility with hardened/alternative operating systems
 
-Die Android-App hat **keine Abhängigkeit von Google Play Services oder
-Firebase** (kein Push-Dienst, keine Analytics-SDKs) und funktioniert daher
-unverändert auf de-googelten Systemen wie **GrapheneOS**. Eine
-`network_security_config.xml` erzwingt zusätzlich `wss://` für jeden Host
-außer `localhost`/`127.0.0.1`/`10.0.2.2` (Emulator-Alias) — Klartext-`ws://`
-ist nur auf dem eigenen Gerät erlaubt, defense-in-depth zur App-eigenen
-Warnung in den Einstellungen.
+The Android app has **no dependency on Google Play Services or
+Firebase** (no push service, no analytics SDKs) and therefore works
+unchanged on de-Googled systems such as **GrapheneOS**. A
+`network_security_config.xml` additionally enforces `wss://` for every host
+except `localhost`/`127.0.0.1`/`10.0.2.2` (the emulator alias) — plaintext `ws://`
+is only allowed on your own device, defense-in-depth to the app's own
+warning in the settings.
 
-## 4f. Dependency-Pinning & Supply-Chain-Prüfung
+## 4f. Dependency pinning & supply-chain check
 
-Höchste Priorität der [Härtungs-Roadmap](docs/inventions/RenkerVault-Haertungs-Roadmap.md)
-auf der technischen Schiene: Eine kompromittierte transitive Abhängigkeit
-von `@noble/curves`, `@noble/hashes`, `@noble/post-quantum` oder
-`hash-wasm` würde jede andere Härtungsmaßnahme wertlos machen (reale
-Präzedenzfälle: `event-stream` 2018, `ua-parser-js` 2021).
+The highest priority of the [hardening roadmap](docs/inventions/RenkerVault-Haertungs-Roadmap.md)
+on the technical track: a compromised transitive dependency
+of `@noble/curves`, `@noble/hashes`, `@noble/post-quantum`, or
+`hash-wasm` would render every other hardening measure worthless (real
+precedents: `event-stream` 2018, `ua-parser-js` 2021).
 
-- **Exakte Versionspins:** Alle direkten Abhängigkeiten in `client/package.json`
-  und `server/package.json` sind auf exakte, aktuell installierte Versionen
-  fixiert (keine `^`/`~`-Ranges mehr) — ein `npm install` zieht damit nicht
-  mehr automatisch neue Minor-/Patch-Versionen nach, die ungeprüft ins Projekt
-  einfließen könnten. `package-lock.json` bleibt zusätzlich als zweite,
-  transitive Pinning-Ebene bestehen.
-- **`npm audit`-Ergebnis (Stand dieses Updates):** Server-Abhängigkeiten
-  0 Findings. Client-Abhängigkeiten: 6 Findings in reiner Build-Tooling-Kette
-  (esbuild/vite/postcss/tar/nanoid/brace-expansion, alle transitiv über Vite),
-  **keine** in den kryptografierelevanten Laufzeit-Paketen
-  (`@noble/*`, `hash-wasm`, `react`, `@capacitor/*`, `@tauri-apps/*`). Vier
-  davon (brace-expansion, nanoid, postcss, tar) sind ohne Breaking Change
-  behoben.
-- **Bewusst offen gelassen:** Die verbleibenden zwei Findings (`esbuild`
-  moderate, `vite` high — Vite ≤6.4.2 hängt von einer verwundbaren
-  esbuild-Version ab) beträfen ausschließlich den lokalen Dev-Server
-  (`npm run dev`: eine bösartige Website könnte im Browser des
-  Entwicklers Anfragen an den Dev-Server stellen und Antworten mitlesen —
-  betrifft NIE den produktiven Build oder Endnutzer). Der Fix verlangt einen
-  Major-Sprung auf Vite 8, den `@vitejs/plugin-react` (aktuell 4.7.0) noch
-  nicht offiziell als Peer-Dependency unterstützt (Range endet bei `^7.0.0`).
-  Ein Test hat gezeigt: Der Sprung lässt sich zwar mit `--force` erzwingen und
-  Build/Dev-Server laufen danach sogar fehlerfrei — aber jede zukünftige
-  `npm install` ohne `--force` bräche danach dauerhaft mit einem
-  ERESOLVE-Fehler. Dieser Tausch (dev-only-Lücke schließen gegen einen
-  kaputten Standard-Installationsablauf für jeden künftigen Checkout) wurde
-  bewusst NICHT gemacht — stattdessen bleibt Vite auf 5.4.21 gepinnt, bis
-  `@vitejs/plugin-react` Vite 8 offiziell unterstützt. Erneut prüfen, sobald
-  eine neue `@vitejs/plugin-react`-Version erscheint.
-- **Kein automatisierter, wiederkehrender Check:** Es gibt (Stand jetzt)
-  keine CI-Pipeline, die `npm audit` bei jedem Build automatisch ausführt —
-  der Prototyp hat keine CI konfiguriert. Bis dahin: `npm audit` manuell in
-  `client/` und `server/` vor jedem Release erneut ausführen.
+- **Exact version pins:** all direct dependencies in `client/package.json`
+  and `server/package.json` are fixed to exact, currently installed versions
+  (no more `^`/`~` ranges) — an `npm install` therefore no longer
+  automatically pulls new minor/patch versions that could flow unchecked into the project.
+  `package-lock.json` additionally remains as a second,
+  transitive pinning layer.
+- **`npm audit` result (as of this update):** server dependencies
+  0 findings. Client dependencies: 6 findings in the pure build-tooling chain
+  (esbuild/vite/postcss/tar/nanoid/brace-expansion, all transitive via Vite),
+  **none** in the crypto-relevant runtime packages
+  (`@noble/*`, `hash-wasm`, `react`, `@capacitor/*`, `@tauri-apps/*`). Four
+  of them (brace-expansion, nanoid, postcss, tar) are fixed without a breaking change.
+- **Deliberately left open:** the remaining two findings (`esbuild`
+  moderate, `vite` high — Vite ≤6.4.2 depends on a vulnerable
+  esbuild version) would affect exclusively the local dev server
+  (`npm run dev`: a malicious website could make requests to the dev server
+  in the developer's browser and read responses —
+  NEVER affects the production build or end users). The fix requires a
+  major jump to Vite 8, which `@vitejs/plugin-react` (currently 4.7.0) does not
+  yet officially support as a peer dependency (the range ends at `^7.0.0`).
+  A test showed: the jump can be forced with `--force` and the
+  build/dev server even run without error afterwards — but every future
+  `npm install` without `--force` would then break permanently with an
+  ERESOLVE error. This trade (closing a dev-only gap against a
+  broken default installation flow for every future checkout) was
+  deliberately NOT made — instead Vite stays pinned at 5.4.21 until
+  `@vitejs/plugin-react` officially supports Vite 8. Re-check as soon as
+  a new `@vitejs/plugin-react` version appears.
+- **No automated, recurring check:** there is (as of now)
+  no CI pipeline that runs `npm audit` automatically on every build —
+  the prototype has no CI configured. Until then: run `npm audit` manually in
+  `client/` and `server/` again before every release.
 
-## 4g. Padding & Tarn-Traffic (Metadaten-Minimierung, Fortsetzung von 3a/4f)
+## 4g. Padding & cover traffic (metadata minimization, continuation of 3a/4f)
 
-Härtungs-Roadmap Punkt 4, direkt aus dem README-Hintergrundabschnitt
-begründet (Ziel: Überwachungsresistenz, nicht nur Inhalts-Vertraulichkeit).
+Hardening roadmap point 4, justified directly from the README background section
+(goal: surveillance resistance, not just content confidentiality).
 
-- **Padding (`crypto/padding.ts`):** Jede Nachricht — Text, Datei,
-  Gruppen-Nachricht und auch die internen Marker (`presence`, `deleted`,
-  `reaction`) — wird vor der AES-GCM-Verschlüsselung auf eine von neun
-  festen Größenstufen (64 B – 1,25 MiB) gepolstert. Der Relay sieht damit
-  nur noch eine von wenigen Chiffretext-Größen statt der exakten
-  Klartextlänge. ISO/IEC-7816-4-artiges Schema (0x80-Markerbyte +
-  Nullbytes), keine eigene Kryptografie — reine Byte-Manipulation auf
-  bereits fertigem Klartext. 40 isolierte Unit-Checks (Rundlauf an allen
-  Stufengrenzen, leere Nachricht, Overflow, korrupte Daten) plus
-  End-zu-Ende-Verifikation über zwei echte Browser-Clients.
-- **Tarn-Traffic (`net/realchat.ts`, `ui/App.tsx`):** Poisson-artig
-  gejitterte Dummy-Nachrichten (Mittelwert 60 s, 20–180 s Streuung) an
-  zufällig gewählte, bereits bekannte Kontakte — Standard AN, in den
-  Einstellungen abschaltbar. Entscheidend: Diese laufen als ganz normale
-  `kind:'text'`-Envelopes; der Unterscheidungs-Marker steckt
-  AUSSCHLIESSLICH in der Ende-zu-Ende-verschlüsselten Nutzlast (ein fester
-  32-Byte-SHA-256-Wert), NICHT in einem eigenen Envelope-Feld — sonst
-  könnte der Relay Tarn-Nachrichten trivial am Klartextfeld herausfiltern,
-  genau das, was der Mechanismus verhindern soll. Der Empfänger erkennt
-  und verwirft sie beim Entschlüsseln still (kein UI-Eintrag, kein
-  Unread-Bump). Verifiziert per echtem Zwei-Browser-Test mit temporär
-  verkürztem Intervall: mehrfacher bidirektionaler Tarn-Traffic-Austausch
-  beobachtet, Chat-Verlauf zeigt danach weiterhin ausschließlich die
-  tatsächlich gesendeten Nachrichten.
-- **Ehrliche Grenze (identisch zu Kandidat D der Sicherheitserfindungs-
-  Analyse):** Bei sehr wenigen Kontakten pro Konto bleibt die statistische
-  Verschleierung schwächer als bei vielen. Kostet dauerhaft etwas
-  Bandbreite/Akku, auch wenn niemand aktiv chattet. Verschleiert Größe und
-  Sendehäufigkeit — verschleiert NICHT, dass überhaupt eine authentifizierte
-  Verbindung zum Relay besteht (siehe Punkt 8 oben).
+- **Padding (`crypto/padding.ts`):** every message — text, file,
+  group message, and also the internal markers (`presence`, `deleted`,
+  `reaction`) — is, before AES-GCM encryption, padded to one of nine
+  fixed size buckets (64 B – 1.25 MiB). The relay thus sees
+  only one of a few ciphertext sizes instead of the exact
+  plaintext length. An ISO/IEC-7816-4-like scheme (0x80 marker byte +
+  null bytes), no custom cryptography — pure byte manipulation on
+  already-finished plaintext. 40 isolated unit checks (round trip at all
+  bucket boundaries, empty message, overflow, corrupt data) plus
+  end-to-end verification over two real browser clients.
+- **Cover traffic (`net/realchat.ts`, `ui/App.tsx`):** Poisson-like
+  jittered dummy messages (mean 60 s, 20–180 s spread) to
+  randomly chosen, already-known contacts — on by default, disableable in
+  the settings. Crucially: these run as perfectly normal
+  `kind:'text'` envelopes; the distinguishing marker is
+  EXCLUSIVELY in the end-to-end-encrypted payload (a fixed
+  32-byte SHA-256 value), NOT in a separate envelope field — otherwise
+  the relay could trivially filter out cover messages by the plaintext field,
+  exactly what the mechanism is meant to prevent. The recipient detects
+  and discards them silently on decryption (no UI entry, no
+  unread bump). Verified via a real two-browser test with a temporarily
+  shortened interval: multiple bidirectional cover-traffic exchanges
+  observed, the chat history afterwards still shows exclusively the
+  actually sent messages.
+- **Honest limit (identical to candidate D of the security-invention
+  analysis):** with very few contacts per account, the statistical
+  obscuring stays weaker than with many. Costs some
+  bandwidth/battery continuously, even when nobody is actively chatting. Obscures the size and
+  send frequency — does NOT obscure that an authenticated
+  connection to the relay exists at all (see point 8 above).
 
-## 4h. Reproduzierbare Builds (Vorstufe zu signierten Builds, Härtungs-Roadmap Punkt 2)
+## 4h. Reproducible builds (a precursor to signed builds, hardening roadmap point 2)
 
-- **Exakte Versionspins auch auf der Rust-/Tauri-Seite:**
-  `src-tauri/Cargo.toml` fixiert jetzt ebenfalls exakte Versionen (`=x.y.z`
-  statt Caret-Ranges) für `tauri`, `tauri-build`, `tauri-plugin-log`,
-  `serde`, `serde_json`, `log`. Zusätzlich fixiert `src-tauri/rust-toolchain.toml`
-  die exakte Rust-Toolchain-Version (`rustup` lädt sie bei Bedarf automatisch
-  nach) — ohne diese Datei könnten verschiedene Maschinen mit
-  unterschiedlichen `rustc`-Versionen aus demselben Quellcode
-  unterschiedliche Binaries erzeugen.
-- **Checksummen (`client/gen-checksums.mjs`, `npm run checksums`):**
-  Erzeugt `SHA256SUMS.txt` über alle vorhandenen Build-Artefakte (Web-Dist,
-  Tauri-Bundle, Android-APK/AAB). Ersetzt KEINE Code-Signatur — schützt
-  nicht vor einem Angreifer, der sowohl Artefakt als auch Checksummen-Datei
-  bei der Auslieferung kontrolliert. Sinn: Wer den Build selbst
-  reproduziert, kann seinen Hash gegen einen unabhängig veröffentlichten
-  (z. B. per GPG signierten Release-Eintrag) vergleichen.
-- **Bewusst NICHT umgesetzt: echte Code-Signatur.** Das braucht reale
-  Zertifikate (Windows Authenticode, Apple Developer Program, Android
-  Play-Signing) — organisatorische Voraussetzungen (Registrierung,
-  Identitätsprüfung, laufende Kosten), die kein Code-Schritt ersetzen kann.
-  Build- und Toolchain-Reproduzierbarkeit sind die Vorstufe dazu, die jetzt
-  steht; die eigentliche Signatur bleibt in Abschnitt 5 offen.
+- **Exact version pins on the Rust/Tauri side too:**
+  `src-tauri/Cargo.toml` now also fixes exact versions (`=x.y.z`
+  instead of caret ranges) for `tauri`, `tauri-build`, `tauri-plugin-log`,
+  `serde`, `serde_json`, `log`. Additionally, `src-tauri/rust-toolchain.toml`
+  fixes the exact Rust toolchain version (`rustup` downloads it automatically
+  on demand) — without this file, different machines with
+  different `rustc` versions could produce different binaries
+  from the same source code.
+- **Checksums (`client/gen-checksums.mjs`, `npm run checksums`):**
+  generates `SHA256SUMS.txt` over all present build artifacts (web dist,
+  Tauri bundle, Android APK/AAB). Does NOT replace a code signature — does
+  not protect against an attacker who controls both the artifact and the checksum
+  file at delivery. The point: whoever reproduces the build
+  themselves can compare their hash against an independently published
+  one (e.g. a GPG-signed release entry).
+- **Deliberately NOT implemented: a real code signature.** That needs real
+  certificates (Windows Authenticode, Apple Developer Program, Android
+  Play signing) — organizational prerequisites (registration,
+  identity verification, ongoing costs) that no code step can replace.
+  Build and toolchain reproducibility are the precursor to it, which now
+  stands; the actual signature remains open in section 5.
 
-## 5. Vor Produktiveinsatz zwingend
+## 5. Mandatory before production use
 
-- Externes Kryptografie-Audit (insbesondere `crypto/ratchet.ts`, `crypto/vault.ts`)
-  **oder** Ersatz durch natives libsignal (Tauri/FFI).
-- ~~Volles X3DH mit signierten Prekeys + One-Time-Prekeys~~ — seit diesem
-  Update umgesetzt (Abschnitt 4, Punkt 2).
-- TLS (wss://) ist verfügbar und sollte für jeden Betrieb außerhalb von
-  `localhost` zwingend genutzt werden (siehe deploy/DEPLOYMENT.md).
-  ~~Zertifikats-Pinning~~ — Android-Template seit diesem Update vorhanden
-  (Abschnitt 4a), Browser/Tauri bleiben mangels Plattform-API offen.
-  ~~DDoS-Schutz vor dem Reverse-Proxy~~ — gestufte Optionen seit diesem
-  Update dokumentiert (deploy/DEPLOYMENT.md), echter Schutz gegen verteilte
-  Angriffe bleibt nur über einen vorgeschalteten CDN-Dienst möglich.
-  Weiterhin offen: persistenter Server-Store (PostgreSQL).
-- ~~Sealed-Sender-artige Metadaten-Minimierung~~ — für 1:1-Folgenachrichten
-  seit diesem Update umgesetzt (Abschnitt 3a), ~~Padding und Cover-Traffic~~
-  ebenfalls (Abschnitt 4g). Erstkontakt-Nachrichten sowie Anonymität
-  gegenüber dem live authentifizierenden Relay-Betreiber selbst bleiben
-  offen (dafür wären anonyme Zugangs-Credentials nötig).
-- Signierte Client-Builds — ~~reproduzierbare~~ Build-/Toolchain-Basis seit
-  diesem Update vorhanden (Abschnitt 4h), die eigentliche Zertifikats-
-  Signatur (Windows/macOS/Android) braucht reale, organisatorisch zu
-  beschaffende Zertifikate.
-- ~~Dependency-Pinning + Supply-Chain-Prüfung~~ — seit diesem Update umgesetzt
-  (Abschnitt 4f).
-- Hardware-gebundener Vault-Schlüssel und SQLCipher+OS-Keychain für die
-  Tauri-Desktop-Variante — Architektur skizziert (Abschnitt 4 Punkt 6),
-  Umsetzung bewusst zurückgestellt (nur auf echter Hardware/einem
-  laufenden Tauri-Prozess verifizierbar, siehe docs/inventions/
-  RenkerVault-Haertungs-Roadmap.md, Punkte 6 und 8).
-- Threat-Model-Review (formal), Pen-Test des Relay — Scope-Dokument bereits
-  vorhanden: [docs/inventions/RenkerVault-Audit-Vorbereitung.md](docs/inventions/RenkerVault-Audit-Vorbereitung.md).
-- Migration der Gruppenverschlüsselung auf eine etablierte Konstruktion
-  (Sender-Keys/MLS) — aktuelles Modell für kleine, vertrauende Gruppen
-  ausreichend, nicht für Szenarien mit potenziell böswilligen Mitgliedern
-  (siehe [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)).
-- **Externes** Kryptografie-Audit bleibt trotz des internen
-  Security-Hardening-Audits vom 10.08.2026 offen — Details, was dieses
-  interne Audit abgedeckt hat und was nicht, siehe
-  [docs/THREAT_MODEL.md, Abschnitt „Auditierte vs. nicht auditierte
-  Teile"](docs/THREAT_MODEL.md#auditierte-vs-nicht-auditierte-teile).
+- An external cryptography audit (in particular `crypto/ratchet.ts`, `crypto/vault.ts`)
+  **or** replacement with native libsignal (Tauri/FFI).
+- ~~Full X3DH with signed prekeys + one-time prekeys~~ — implemented since this
+  update (section 4, point 2).
+- TLS (wss://) is available and should be mandatorily used for any operation outside
+  `localhost` (see deploy/DEPLOYMENT.md).
+  ~~Certificate pinning~~ — an Android template present since this update
+  (section 4a), browser/Tauri remain open for lack of a platform API.
+  ~~DDoS protection in front of the reverse proxy~~ — tiered options documented
+  since this update (deploy/DEPLOYMENT.md), real protection against distributed
+  attacks remains possible only via an upstream CDN service.
+  Still open: a persistent server store (PostgreSQL).
+- ~~Sealed-sender-like metadata minimization~~ — for 1:1 follow-up messages
+  implemented since this update (section 3a), ~~padding and cover traffic~~
+  also (section 4g). First-contact messages and anonymity
+  toward the live-authenticating relay operator itself remain
+  open (that would need anonymous access credentials).
+- Signed client builds — a ~~reproducible~~ build/toolchain base present since
+  this update (section 4h), the actual certificate
+  signature (Windows/macOS/Android) needs real certificates to be
+  procured organizationally.
+- ~~Dependency pinning + supply-chain check~~ — implemented since this update
+  (section 4f).
+- A hardware-bound vault key and SQLCipher+OS keychain for the
+  Tauri desktop variant — the architecture is sketched (section 4 point 6),
+  implementation deliberately deferred (verifiable only on real hardware/a
+  running Tauri process, see docs/inventions/
+  RenkerVault-Haertungs-Roadmap.md, points 6 and 8).
+- A threat-model review (formal), a pen test of the relay — a scope document already
+  exists: [docs/inventions/RenkerVault-Audit-Vorbereitung.md](docs/inventions/RenkerVault-Audit-Vorbereitung.md).
+- Migration of the group encryption to an established construction
+  (sender keys/MLS) — the current model is sufficient for small, trusting groups,
+  not for scenarios with potentially malicious members
+  (see [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)).
+- An **external** cryptography audit remains open despite the internal
+  security-hardening audit of 2026-08-10 — for details on what this
+  internal audit covered and what not, see
+  [docs/THREAT_MODEL.md, "Audited vs. non-audited
+  parts"](docs/THREAT_MODEL.md#audited-vs-non-audited-parts).
 
-## 6. Meldung von Sicherheitslücken
+## 6. Reporting security vulnerabilities
 
-Prototyp — Findings bitte direkt als Issue/Notiz an den Maintainer
-(Renker Industries, intern).
+A prototype — please send findings directly as an issue/note to the maintainer
+(Renker Industries, internal).

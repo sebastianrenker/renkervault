@@ -49,7 +49,7 @@ mass surveillance — not as a tool "against" child protection.
 FIPS 203; defends against "harvest now, decrypt later"), "burn session (🔥)"
 (immediate, irreversible deletion including the encryption session), and a **Tor
 hidden service** as a hosting option. Deliberately NOT implemented (with rationale
-in [SECURITY.md](SECURITY.md#4d-warum-es-kein-one-time-pad-und-keinen-quanten-zufallsgenerator-gibt)):
+in [SECURITY.md](SECURITY.md#4d-why-there-is-no-one-time-pad-and-no-quantum-random-generator)):
 a one-time pad and a "true" quantum random number generator.
 
 ## Architecture
