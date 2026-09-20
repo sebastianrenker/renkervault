@@ -7,8 +7,8 @@ import { Ratchet, handshakeInitiator, handshakeResponder, RatchetMessage } from 
 
 const bytes = (min = 0, max = 4096) => fc.uint8Array({ minLength: min, maxLength: max });
 
-describe('Fuzzing — Padding-Parser (padding.ts)', () => {
-  it('unpadFromTier stürzt bei beliebigen Bytes nie mit einer nicht abgefangenen Exception ab', () => {
+describe('Fuzzing — padding parser (padding.ts)', () => {
+  it('unpadFromTier never crashes on arbitrary bytes with an uncaught exception', () => {
     fc.assert(fc.property(bytes(0, 2_000_000), (data) => {
       try {
         unpadFromTier(data);
@@ -18,7 +18,7 @@ describe('Fuzzing — Padding-Parser (padding.ts)', () => {
     }), { numRuns: 500 });
   });
 
-  it('unpadFromTier(padToTier(x)) == x für beliebige Klartexte innerhalb der Größenstufen', () => {
+  it('unpadFromTier(padToTier(x)) == x for arbitrary plaintexts within the size tiers', () => {
     fc.assert(fc.property(bytes(0, PAD_TIERS[PAD_TIERS.length - 1] - 1), (data) => {
       const padded = padToTier(data);
       const recovered = unpadFromTier(padded);
@@ -26,7 +26,7 @@ describe('Fuzzing — Padding-Parser (padding.ts)', () => {
     }), { numRuns: 200 });
   });
 
-  it('padToTier lehnt Nutzlasten über der größten Stufe kontrolliert ab, statt zu crashen', () => {
+  it('padToTier rejects payloads above the largest tier in a controlled way instead of crashing', () => {
     fc.assert(fc.property(fc.integer({ min: PAD_TIERS[PAD_TIERS.length - 1], max: PAD_TIERS[PAD_TIERS.length - 1] + 10 }), (len) => {
       const data = new Uint8Array(len);
       expect(() => padToTier(data)).toThrow();
@@ -34,7 +34,7 @@ describe('Fuzzing — Padding-Parser (padding.ts)', () => {
   });
 });
 
-describe('Fuzzing — Ratchet gegen feindliche Nachrichten', () => {
+describe('Fuzzing — ratchet against hostile messages', () => {
   function establish() {
     const alice = { identity: newX25519(), prekey: newX25519(), pq: newPqKeyPair() };
     const bob = { identity: newX25519(), prekey: newX25519(), pq: newPqKeyPair() };
@@ -44,7 +44,7 @@ describe('Fuzzing — Ratchet gegen feindliche Nachrichten', () => {
     return { alice: Ratchet.initAlice(sk, bob.prekey.pub) , bobRatchetInit: () => Ratchet.initBob(bobSk, bob.prekey) };
   }
 
-  it('zufällige/abgeschnittene/übergroße Ciphertexts mit beliebigem Header werden immer sicher abgelehnt', async () => {
+  it('random/truncated/oversized ciphertexts with an arbitrary header are always safely rejected', async () => {
     const { bobRatchetInit } = establish();
     await fc.assert(fc.asyncProperty(
       fc.record({
@@ -58,15 +58,15 @@ describe('Fuzzing — Ratchet gegen feindliche Nachrichten', () => {
         const msg: RatchetMessage = { header, ct: b64.enc(ctBytes) };
         let threw = false;
         try { await bob.decrypt(msg); } catch { threw = true; }
-        // Bei zufaelligen Eingaben darf so gut wie nie erfolgreich entschluesselt
-        // werden — entscheidend ist: kein Crash ausserhalb eines gefangenen Errors
-        // (das asyncProperty selbst wuerde sonst fehlschlagen), kein Hang.
+        // With random inputs decryption should almost never succeed — what matters
+        // is: no crash outside a caught error (the asyncProperty itself would fail
+        // otherwise), no hang.
         expect(typeof threw).toBe('boolean');
       }
     ), { numRuns: 100 });
   });
 
-  it('ein Legit-Austausch bleibt nach vorherigen Fuzz-Angriffsversuchen auf derselben Instanz funktionsfähig', async () => {
+  it('a legit exchange stays functional after previous fuzz attack attempts on the same instance', async () => {
     const { alice, bobRatchetInit } = establish();
     const bob = bobRatchetInit();
 
@@ -75,11 +75,11 @@ describe('Fuzzing — Ratchet gegen feindliche Nachrichten', () => {
         header: { dh: b64.enc(new Uint8Array(32)), pn: 0, n: i },
         ct: b64.enc(new Uint8Array(16 + i)),
       };
-      try { await bob.decrypt(junk); } catch { /* erwartet */ }
+      try { await bob.decrypt(junk); } catch { /* expected */ }
     }
 
-    const real = await alice.encrypt(new TextEncoder().encode('trotzdem lesbar'));
+    const real = await alice.encrypt(new TextEncoder().encode('still readable'));
     const plain = await bob.decrypt(real);
-    expect(new TextDecoder().decode(plain)).toBe('trotzdem lesbar');
+    expect(new TextDecoder().decode(plain)).toBe('still readable');
   });
 });

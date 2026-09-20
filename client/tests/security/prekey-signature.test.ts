@@ -30,8 +30,8 @@ function contactFrom(identity: Identity): Contact {
   };
 }
 
-describe('X3DH — Prekey-Signatur-Bindung (PREKEY-SIG)', () => {
-  it('beginSession funktioniert normal mit korrekt signierten Prekeys', () => {
+describe('X3DH — prekey signature binding (PREKEY-SIG)', () => {
+  it('beginSession works normally with correctly signed prekeys', () => {
     const alice = makeIdentity('alice');
     const bob = makeIdentity('bob');
     const engine = new RealChatEngine();
@@ -39,14 +39,14 @@ describe('X3DH — Prekey-Signatur-Bindung (PREKEY-SIG)', () => {
     expect(engine.hasSession('bob')).toBe(true);
   });
 
-  it('lehnt einen vom Relay untergeschobenen fremden Prekey ab (Substitutionsangriff)', () => {
+  it('rejects a foreign prekey slipped in by the relay (substitution attack)', () => {
     const alice = makeIdentity('alice');
     const bob = makeIdentity('bob');
     const mallory = makeIdentity('mallory');
     const engine = new RealChatEngine();
 
-    // Ein böswilliger Relay ersetzt Bobs echten Prekey durch Mallorys —
-    // die Signatur stammt aber weiterhin (fälschlich) "von Bob" behauptet.
+    // A malicious relay replaces Bob's real prekey with Mallory's —
+    // but the signature is still (falsely) claimed to be "from Bob".
     const forgedContact = contactFrom(bob);
     forgedContact.prekeyPub = mallory.prekeyPub;
 
@@ -54,7 +54,7 @@ describe('X3DH — Prekey-Signatur-Bindung (PREKEY-SIG)', () => {
     expect(engine.hasSession('bob')).toBe(false);
   });
 
-  it('lehnt einen untergeschobenen fremden PQ-Prekey ab', () => {
+  it('rejects a foreign PQ prekey slipped in', () => {
     const alice = makeIdentity('alice');
     const bob = makeIdentity('bob');
     const mallory = makeIdentity('mallory');
@@ -66,7 +66,7 @@ describe('X3DH — Prekey-Signatur-Bindung (PREKEY-SIG)', () => {
     expect(() => engine.beginSession(alice, forgedContact)).toThrow();
   });
 
-  it('lehnt einen Kontakt ohne jede Prekey-Signatur ab (kein stiller Fallback)', () => {
+  it('rejects a contact without any prekey signature (no silent fallback)', () => {
     const alice = makeIdentity('alice');
     const bob = makeIdentity('bob');
     const engine = new RealChatEngine();
@@ -78,14 +78,14 @@ describe('X3DH — Prekey-Signatur-Bindung (PREKEY-SIG)', () => {
     expect(() => engine.beginSession(alice, unsigned)).toThrow();
   });
 
-  it('lehnt eine Signatur ab, die mit einem falschen Identitätsschlüssel erzeugt wurde', () => {
+  it('rejects a signature produced with a wrong identity key', () => {
     const alice = makeIdentity('alice');
     const bob = makeIdentity('bob');
     const mallory = makeIdentity('mallory');
     const engine = new RealChatEngine();
 
-    // Mallory signiert BOBs echten Prekey mit IHREM EIGENEN Identitätsschlüssel
-    // und gibt sich als Bob aus (edPub bleibt Bobs echter Wert im Envelope-Feld).
+    // Mallory signs BOB's real prekey with HER OWN identity key
+    // and poses as Bob (edPub stays Bob's real value in the envelope field).
     const spoofed = contactFrom(bob);
     spoofed.prekeySig = b64.enc(edSign(b64.dec(bob.prekeyPub), b64.dec(mallory.edPriv)));
 

@@ -11,7 +11,7 @@ let port: number;
 beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const addr = server.address();
-  if (!addr || typeof addr === 'string') throw new Error('kein Port');
+  if (!addr || typeof addr === 'string') throw new Error('no port');
   port = addr.port;
 });
 
@@ -40,7 +40,7 @@ async function authedSocket(): Promise<WebSocket> {
         ws.send(JSON.stringify({ type: 'proof', sig: b64enc(sig) }));
       }
     });
-    ws.once('message', () => {}); // dummy, echter Warte-Handler unten
+    ws.once('message', () => {}); // dummy, the real wait handler is below
     const onAuthed = (data: Buffer) => {
       const m = JSON.parse(data.toString());
       if (m.type === 'authed') { ws.off('message', onAuthed); resolve(); }
@@ -54,16 +54,16 @@ async function authedSocket(): Promise<WebSocket> {
   return ws;
 }
 
-describe('Fuzzing — Relay gegen beliebige/bösartige WebSocket-Nachrichten', () => {
-  it('rohe, zufällige Bytes/Strings vor der Authentifizierung bringen den Server nie zum Absturz', async () => {
+describe('Fuzzing — relay against arbitrary/malicious WebSocket messages', () => {
+  it('raw, random bytes/strings before authentication never crash the server', async () => {
     const ws = await connect();
     await fc.assert(fc.asyncProperty(fc.string({ maxLength: 2000 }), async (raw) => {
       ws.send(raw);
       await new Promise((r) => setTimeout(r, 2));
     }), { numRuns: 100 });
 
-    // Server muss danach fuer eine neue, saubere Verbindung weiterhin normal
-    // funktionieren — kein globaler Absturz durch die Garbage-Nachrichten.
+    // The server must still work normally for a new, clean connection
+    // afterwards — no global crash from the garbage messages.
     const fresh = await connect();
     const challenge = await new Promise<any>((resolve) => {
       fresh.once('message', (d) => resolve(JSON.parse(d.toString())));
@@ -76,14 +76,14 @@ describe('Fuzzing — Relay gegen beliebige/bösartige WebSocket-Nachrichten', (
     ws.close(); fresh.close();
   }, 20000);
 
-  it('zufällige JSON-Objekte als authentifizierte Nachrichten bringen den Server nie zum Absturz', async () => {
+  it('random JSON objects as authenticated messages never crash the server', async () => {
     const ws = await authedSocket();
     await fc.assert(fc.asyncProperty(fc.jsonValue(), async (value) => {
       ws.send(JSON.stringify(value));
       await new Promise((r) => setTimeout(r, 2));
     }), { numRuns: 100 });
 
-    // Verbindung/Server muessen danach weiterhin normal antworten.
+    // The connection/server must still respond normally afterwards.
     const pingRes = await new Promise<any>((resolve) => {
       ws.once('message', (d) => resolve(JSON.parse(d.toString())));
       ws.send(JSON.stringify({ type: 'devices' }));
@@ -92,17 +92,17 @@ describe('Fuzzing — Relay gegen beliebige/bösartige WebSocket-Nachrichten', (
     ws.close();
   }, 20000);
 
-  it('Nachrichtentypen mit fehlenden/falsch typisierten Feldern werden abgelehnt statt zu crashen', async () => {
+  it('message types with missing/mistyped fields are rejected instead of crashing', async () => {
     const ws = await authedSocket();
     const malformed = [
       { type: 'send' },
-      { type: 'send', to: 123, envelope: 'nicht-objekt' },
+      { type: 'send', to: 123, envelope: 'not-an-object' },
       { type: 'send', to: 'x', envelope: {} },
       { type: 'lookup' },
       { type: 'lookup', userId: null },
       { type: 'approve-device' },
       { type: 'revoke-device', deviceId: 12345 },
-      { type: 'publish-otpks', keys: 'nicht-array' },
+      { type: 'publish-otpks', keys: 'not-an-array' },
       { type: 'publish-otpks', keys: [null, undefined, 42, { id: 1 }] },
     ];
     for (const m of malformed) {

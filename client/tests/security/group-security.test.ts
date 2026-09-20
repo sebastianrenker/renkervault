@@ -3,8 +3,8 @@ import { b64 } from '../../src/crypto/primitives';
 import { RealChatEngine } from '../../src/net/realchat';
 import { newGroupEpochKey } from '../../src/crypto/ratchet';
 
-describe('Gruppen-Verschlüsselung — Epoch-Rollback-Schutz (GROUP-A)', () => {
-  it('nimmt eine group-key-Nachricht mit steigender Epoche an', () => {
+describe('Group encryption — epoch rollback protection (GROUP-A)', () => {
+  it('accepts a group-key message with an increasing epoch', () => {
     const engine = new RealChatEngine();
     const chatId = 'grp-1';
     const key1 = b64.enc(newGroupEpochKey());
@@ -16,7 +16,7 @@ describe('Gruppen-Verschlüsselung — Epoch-Rollback-Schutz (GROUP-A)', () => {
     expect(engine.currentGroupKeyB64(chatId)?.key).toBe(key2);
   });
 
-  it('lehnt eine replayte, veraltete group-key-Nachricht ab (Epoch-Rollback)', () => {
+  it('rejects a replayed, outdated group-key message (epoch rollback)', () => {
     const engine = new RealChatEngine();
     const chatId = 'grp-2';
     const oldKey = b64.enc(newGroupEpochKey());
@@ -25,16 +25,16 @@ describe('Gruppen-Verschlüsselung — Epoch-Rollback-Schutz (GROUP-A)', () => {
     engine.applyGroupKey(chatId, oldKey, 1);
     engine.applyGroupKey(chatId, newKey, 2);
 
-    // Angreifer/böswilliges Mitglied dupliziert die ALTE group-key-Nachricht (Epoche 1)
+    // Attacker/malicious member duplicates the OLD group-key message (epoch 1)
     const result = engine.applyGroupKey(chatId, oldKey, 1);
 
     expect(result).toBeNull();
-    // Der aktuelle (neuere) Schlüssel darf dadurch nicht verdrängt worden sein.
+    // The current (newer) key must not have been displaced by this.
     expect(engine.currentGroupKeyB64(chatId)?.epoch).toBe(2);
     expect(engine.currentGroupKeyB64(chatId)?.key).toBe(newKey);
   });
 
-  it('lehnt eine erneute Zustellung derselben Epoche ab (kein stiller Downgrade auf denselben Stand)', () => {
+  it('rejects redelivery of the same epoch (no silent downgrade to the same state)', () => {
     const engine = new RealChatEngine();
     const chatId = 'grp-3';
     const key = b64.enc(newGroupEpochKey());
@@ -45,7 +45,7 @@ describe('Gruppen-Verschlüsselung — Epoch-Rollback-Schutz (GROUP-A)', () => {
     expect(replay).toBeNull();
   });
 
-  it('akzeptiert den allerersten Schlüssel für eine neue Gruppe unabhängig von der Startepoche', () => {
+  it('accepts the very first key for a new group regardless of the starting epoch', () => {
     const engine = new RealChatEngine();
     const chatId = 'grp-4';
     const key = b64.enc(newGroupEpochKey());
@@ -53,21 +53,21 @@ describe('Gruppen-Verschlüsselung — Epoch-Rollback-Schutz (GROUP-A)', () => {
     expect(engine.applyGroupKey(chatId, key, 1)).not.toBeNull();
   });
 
-  it('ein kompromittierter alter Epoch-Key bleibt nach Rotation nutzlos, solange kein Replay erfolgreich ist', async () => {
+  it('a compromised old epoch key stays useless after rotation as long as no replay succeeds', async () => {
     const engine = new RealChatEngine();
     const chatId = 'grp-5';
     const oldKey = b64.enc(newGroupEpochKey());
     const newKey = b64.enc(newGroupEpochKey());
 
     engine.applyGroupKey(chatId, oldKey, 1);
-    const enc = await engine.encryptGroup(chatId, new TextEncoder().encode('vor der rotation'));
+    const enc = await engine.encryptGroup(chatId, new TextEncoder().encode('before the rotation'));
     expect(enc.epoch).toBe(1);
 
     engine.applyGroupKey(chatId, newKey, 2);
-    // Rollback-Versuch auf den alten (kompromittiert angenommenen) Schlüssel schlägt fehl.
+    // Rollback attempt to the old (assumed compromised) key fails.
     expect(engine.applyGroupKey(chatId, oldKey, 1)).toBeNull();
 
-    const enc2 = await engine.encryptGroup(chatId, new TextEncoder().encode('nach der rotation'));
+    const enc2 = await engine.encryptGroup(chatId, new TextEncoder().encode('after the rotation'));
     expect(enc2.epoch).toBe(2);
   });
 });

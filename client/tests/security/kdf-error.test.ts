@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('hash-wasm', () => ({
-  argon2id: vi.fn(async () => { throw new Error('simulierter WASM-OOM'); }),
+  argon2id: vi.fn(async () => { throw new Error('simulated WASM OOM'); }),
 }));
 
 class MemoryStorage {
@@ -13,16 +13,16 @@ class MemoryStorage {
 }
 (globalThis as unknown as { localStorage: MemoryStorage }).localStorage = new MemoryStorage();
 
-describe('Argon2id-Ausführungsfehler wird von "falsches Passwort" unterschieden (ARGON2-ERR)', () => {
-  it('deriveKey wirft eine KdfExecutionError, kein generisches Passwort-Problem', async () => {
+describe('an Argon2id execution error is distinguished from "wrong password" (ARGON2-ERR)', () => {
+  it('deriveKey throws a KdfExecutionError, not a generic password problem', async () => {
     const { deriveKey, KdfExecutionError } = await import('../../src/crypto/primitives');
-    await expect(deriveKey('irgendein-passwort', new Uint8Array(16))).rejects.toBeInstanceOf(KdfExecutionError);
+    await expect(deriveKey('some-password', new Uint8Array(16))).rejects.toBeInstanceOf(KdfExecutionError);
   });
 
-  it('unlockVault meldet reason "kdf-error" statt "wrong-pass", wenn Argon2id fehlschlägt', async () => {
+  it('unlockVault reports reason "kdf-error" instead of "wrong-pass" when Argon2id fails', async () => {
     const { unlockVault } = await import('../../src/crypto/vault');
-    // Es reicht, dass überhaupt eine Vault-Datei existiert — die KDF schlägt
-    // bereits vor jeder MAC-/Passwort-Prüfung fehl.
+    // It is enough that a vault file exists at all — the KDF already fails
+    // before any MAC/password check.
     (globalThis as unknown as { localStorage: MemoryStorage }).localStorage.setItem(
       'renkervault.vault.v1',
       JSON.stringify({
@@ -31,7 +31,7 @@ describe('Argon2id-Ausführungsfehler wird von "falsches Passwort" unterschieden
       })
     );
 
-    const res = await unlockVault('irgendein-passwort');
+    const res = await unlockVault('some-password');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('kdf-error');
   });

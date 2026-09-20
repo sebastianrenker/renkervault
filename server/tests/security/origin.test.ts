@@ -9,7 +9,7 @@ let port: number;
 beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const addr = server.address();
-  if (!addr || typeof addr === 'string') throw new Error('kein Port');
+  if (!addr || typeof addr === 'string') throw new Error('no port');
   port = addr.port;
 });
 
@@ -26,19 +26,19 @@ function connectWithOrigin(origin: string | undefined): Promise<{ ok: boolean; c
   });
 }
 
-describe('Relay — Origin-Validierung (RELAY-ORIGIN)', () => {
-  it('lehnt eine Verbindung mit nicht erlaubtem Origin ab', async () => {
-    const res = await connectWithOrigin('https://boesartige-seite.example');
+describe('Relay — origin validation (RELAY-ORIGIN)', () => {
+  it('rejects a connection with a disallowed origin', async () => {
+    const res = await connectWithOrigin('https://malicious-site.example');
     expect(res.ok).toBe(false);
     expect(res.code).toBe(403);
   });
 
-  it('lässt eine Verbindung mit erlaubtem Origin zu', async () => {
+  it('allows a connection with an allowed origin', async () => {
     const res = await connectWithOrigin('https://chat.example.com');
     expect(res.ok).toBe(true);
   });
 
-  it('lässt Verbindungen ohne Origin-Header zu (native Clients wie Tauri/Android)', async () => {
+  it('allows connections without an Origin header (native clients like Tauri/Android)', async () => {
     const res = await connectWithOrigin(undefined);
     expect(res.ok).toBe(true);
   });

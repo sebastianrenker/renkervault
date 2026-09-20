@@ -40,13 +40,13 @@ async function dec(r: Ratchet, m: RatchetMessage): Promise<string> {
 }
 
 describe('Double Ratchet — X3DH-PQ-Hybrid handshake', () => {
-  it('Alice und Bob leiten denselben initialen Sitzungsschlüssel her', () => {
+  it('Alice and Bob derive the same initial session key', () => {
     const { alice, bob } = establishSession();
     expect(alice.publicKey).toBeInstanceOf(Uint8Array);
     expect(bob.publicKey).toBeInstanceOf(Uint8Array);
   });
 
-  it('volles X3DH (mit One-Time-Prekey) und lite X3DH liefern unterschiedliche Secrets', () => {
+  it('full X3DH (with a one-time prekey) and lite X3DH yield different secrets', () => {
     const alice = makeParty();
     const bob = makeParty();
     const otpk = newX25519();
@@ -57,32 +57,32 @@ describe('Double Ratchet — X3DH-PQ-Hybrid handshake', () => {
   });
 });
 
-describe('Double Ratchet — Grundfluss', () => {
+describe('Double Ratchet — basic flow', () => {
   it('Alice -> Bob -> Alice -> Bob', async () => {
     const { alice, bob } = establishSession();
 
-    const m1 = await enc(alice, 'hallo bob');
-    expect(await dec(bob, m1)).toBe('hallo bob');
+    const m1 = await enc(alice, 'hello bob');
+    expect(await dec(bob, m1)).toBe('hello bob');
 
-    const m2 = await enc(bob, 'hallo alice');
-    expect(await dec(alice, m2)).toBe('hallo alice');
+    const m2 = await enc(bob, 'hello alice');
+    expect(await dec(alice, m2)).toBe('hello alice');
 
-    const m3 = await enc(alice, 'wie geht es dir');
-    expect(await dec(bob, m3)).toBe('wie geht es dir');
+    const m3 = await enc(alice, 'how are you');
+    expect(await dec(bob, m3)).toBe('how are you');
 
-    const m4 = await enc(bob, 'gut, danke');
-    expect(await dec(alice, m4)).toBe('gut, danke');
+    const m4 = await enc(bob, 'good, thanks');
+    expect(await dec(alice, m4)).toBe('good, thanks');
   });
 
-  it('1000 Nachrichten in Folge bleiben korrekt und die Sendekette bleibt in Sync', async () => {
+  it('1000 messages in a row stay correct and the sending chain stays in sync', async () => {
     const { alice, bob } = establishSession();
     for (let i = 0; i < 1000; i++) {
-      const msg = await enc(alice, `nachricht-${i}`);
-      expect(await dec(bob, msg)).toBe(`nachricht-${i}`);
+      const msg = await enc(alice, `message-${i}`);
+      expect(await dec(bob, msg)).toBe(`message-${i}`);
     }
   });
 
-  it('abwechselnde Senderichtung über viele Runden bleibt korrekt', async () => {
+  it('alternating send direction stays correct over many rounds', async () => {
     const { alice, bob } = establishSession();
     for (let i = 0; i < 200; i++) {
       const fromAlice = await enc(alice, `a${i}`);
@@ -93,8 +93,8 @@ describe('Double Ratchet — Grundfluss', () => {
   });
 });
 
-describe('Double Ratchet — Out-of-Order-Zustellung', () => {
-  it('Zustellreihenfolge 1,4,2,3 wird korrekt entschlüsselt (skipped message keys)', async () => {
+describe('Double Ratchet — out-of-order delivery', () => {
+  it('delivery order 1,4,2,3 is decrypted correctly (skipped message keys)', async () => {
     const { alice, bob } = establishSession();
     const msgs = await Promise.all([1, 2, 3, 4].map((i) => enc(alice, `msg-${i}`)));
 
@@ -104,65 +104,65 @@ describe('Double Ratchet — Out-of-Order-Zustellung', () => {
     expect(await dec(bob, msgs[2])).toBe('msg-3');
   });
 
-  it('eine verlorene Nachricht (2 geht verloren) beeinträchtigt spätere Nachrichten nicht', async () => {
+  it('a lost message (2 is lost) does not affect later messages', async () => {
     const { alice, bob } = establishSession();
-    const m1 = await enc(alice, 'eins');
-    const m2 = await enc(alice, 'zwei'); // wird nie zugestellt
-    const m3 = await enc(alice, 'drei');
-    const m4 = await enc(alice, 'vier');
+    const m1 = await enc(alice, 'one');
+    const m2 = await enc(alice, 'two'); // is never delivered
+    const m3 = await enc(alice, 'three');
+    const m4 = await enc(alice, 'four');
     void m2;
 
-    expect(await dec(bob, m1)).toBe('eins');
-    expect(await dec(bob, m3)).toBe('drei');
-    expect(await dec(bob, m4)).toBe('vier');
+    expect(await dec(bob, m1)).toBe('one');
+    expect(await dec(bob, m3)).toBe('three');
+    expect(await dec(bob, m4)).toBe('four');
 
-    // Konversation danach funktioniert normal weiter
-    const m5 = await enc(bob, 'antwort');
-    expect(await dec(alice, m5)).toBe('antwort');
+    // The conversation continues normally afterwards
+    const m5 = await enc(bob, 'reply');
+    expect(await dec(alice, m5)).toBe('reply');
   });
 
-  it('mehr als MAX_SKIP übersprungene Nachrichten werden abgelehnt, ohne den State zu zerstören', async () => {
+  it('more than MAX_SKIP skipped messages are rejected without destroying the state', async () => {
     const { alice, bob } = establishSession();
     const msgs: RatchetMessage[] = [];
     for (let i = 0; i < 100; i++) msgs.push(await enc(alice, `m${i}`));
 
-    // Nachricht 99 direkt zuzustellen überspringt 99 Slots > MAX_SKIP(64) -> muss ablehnen
+    // Delivering message 99 directly skips 99 slots > MAX_SKIP(64) -> must reject
     await expect(bob.decrypt(msgs[99])).rejects.toThrow();
 
-    // Bobs State darf dabei nicht committet worden sein — eine normale, nicht
-    // übersprungene Nachricht muss weiterhin funktionieren und (da es Bobs erste
-    // erfolgreich entschlüsselte Nachricht ist) ihm eine eigene Sendekette geben.
+    // Bob's state must not have been committed here — a normal, non-skipped
+    // message must still work and (since it is Bob's first successfully
+    // decrypted message) give him his own sending chain.
     expect(await dec(bob, msgs[0])).toBe('m0');
-    const reply = await enc(bob, 'ich lebe noch');
-    expect(await dec(alice, reply)).toBe('ich lebe noch');
+    const reply = await enc(bob, 'still alive');
+    expect(await dec(alice, reply)).toBe('still alive');
 
-    // Hinweis: Alice hat 99 weitere Nachrichten aus der ALTEN Kette (1..99), die Bob nie
-    // gesehen hat. Rattscht Alice danach erneut, trägt ihr pn diese 99 offenen Slots —
-    // das übersteigt für Bob weiterhin MAX_SKIP und wird bewusst abgelehnt (inhärente,
-    // dokumentierte Grenze des Skip-Key-Fensters, siehe SECURITY.md).
+    // Note: Alice has 99 more messages from the OLD chain (1..99) that Bob never
+    // saw. If Alice then ratchets again, her pn carries these 99 open slots —
+    // that still exceeds MAX_SKIP for Bob and is deliberately rejected (an inherent,
+    // documented limit of the skip-key window, see SECURITY.md).
   });
 
-  it('dokumentiert: bleibt ein Peer > MAX_SKIP hinter einer Kette zurück, bleibt ein späterer Ratchet dauerhaft unlesbar', async () => {
+  it('documented: if a peer stays > MAX_SKIP behind a chain, a later ratchet stays permanently unreadable', async () => {
     const { alice, bob } = establishSession();
     const msgs: RatchetMessage[] = [];
     for (let i = 0; i < 100; i++) msgs.push(await enc(alice, `m${i}`));
 
-    // Bob sieht nur die allererste Nachricht der Kette, die restlichen 99 nie.
+    // Bob sees only the very first message of the chain, never the remaining 99.
     expect(await dec(bob, msgs[0])).toBe('m0');
 
-    // Alice rattscht (z. B. weil sie auf Bobs Antwort reagiert) und sendet erneut —
-    // ihr Header trägt pn=100 (Länge der alten, für Bob größtenteils unsichtbaren Kette).
-    await dec(alice, await enc(bob, 'antwort'));
-    const afterRatchet = await enc(alice, 'nach dem ratchet');
+    // Alice ratchets (e.g. because she reacts to Bob's reply) and sends again —
+    // her header carries pn=100 (length of the old chain, mostly invisible to Bob).
+    await dec(alice, await enc(bob, 'reply'));
+    const afterRatchet = await enc(alice, 'after the ratchet');
 
-    // Das ist eine bewusste, dokumentierte Grenze des bounded-skip-Designs (wie bei
-    // Signal): Bob kann die 99 fehlenden alten Slots nicht nachträglich aufholen.
+    // This is a deliberate, documented limit of the bounded-skip design (as with
+    // Signal): Bob cannot catch up on the 99 missing old slots afterwards.
     await expect(bob.decrypt(afterRatchet)).rejects.toThrow();
   });
 });
 
-describe('Double Ratchet — Replay- und Tamper-Schutz (P0-Regressionstest)', () => {
-  it('eine wiederholt zugestellte (replayte) Nachricht wird beim zweiten Mal abgelehnt', async () => {
+describe('Double Ratchet — replay and tamper protection (P0 regression test)', () => {
+  it('a repeatedly delivered (replayed) message is rejected the second time', async () => {
     const { alice, bob } = establishSession();
     const m1 = await enc(alice, 'original');
     expect(await dec(bob, m1)).toBe('original');
@@ -170,53 +170,53 @@ describe('Double Ratchet — Replay- und Tamper-Schutz (P0-Regressionstest)', ()
     await expect(bob.decrypt(m1)).rejects.toThrow();
   });
 
-  it('Replay einer bereits verarbeiteten Nachricht korrumpiert NICHT den State für künftige Nachrichten', async () => {
+  it('replaying an already-processed message does NOT corrupt the state for future messages', async () => {
     const { alice, bob } = establishSession();
-    const m1 = await enc(alice, 'eins');
-    const m2 = await enc(alice, 'zwei');
-    expect(await dec(bob, m1)).toBe('eins');
+    const m1 = await enc(alice, 'one');
+    const m2 = await enc(alice, 'two');
+    expect(await dec(bob, m1)).toBe('one');
 
-    // Angreifer/fehlerhaftes Relay dupliziert m1 erneut, BEVOR m2 zugestellt wird
+    // An attacker/faulty relay duplicates m1 again BEFORE m2 is delivered
     await expect(bob.decrypt(m1)).rejects.toThrow();
 
-    // m2 muss trotzdem normal entschlüsselbar sein
-    expect(await dec(bob, m2)).toBe('zwei');
+    // m2 must still be decryptable normally
+    expect(await dec(bob, m2)).toBe('two');
   });
 
-  it('Replay eines bereits verwendeten skipped-message-key wird abgelehnt, ohne den Key doppelt zu verbrauchen', async () => {
+  it('replaying an already-used skipped-message key is rejected without consuming the key twice', async () => {
     const { alice, bob } = establishSession();
-    const m1 = await enc(alice, 'eins');
-    const m2 = await enc(alice, 'zwei');
-    const m3 = await enc(alice, 'drei');
+    const m1 = await enc(alice, 'one');
+    const m2 = await enc(alice, 'two');
+    const m3 = await enc(alice, 'three');
 
-    expect(await dec(bob, m3)).toBe('drei'); // 1 und 2 werden geskippt
-    expect(await dec(bob, m1)).toBe('eins'); // konsumiert den geskippten key für n=0
+    expect(await dec(bob, m3)).toBe('three'); // 1 and 2 are skipped
+    expect(await dec(bob, m1)).toBe('one'); // consumes the skipped key for n=0
 
-    await expect(bob.decrypt(m1)).rejects.toThrow(); // erneuter Replay von m1 muss fehlschlagen
+    await expect(bob.decrypt(m1)).rejects.toThrow(); // replaying m1 again must fail
 
-    // m2 (der andere geskippte key) muss weiterhin abrufbar sein
-    expect(await dec(bob, m2)).toBe('zwei');
+    // m2 (the other skipped key) must still be retrievable
+    expect(await dec(bob, m2)).toBe('two');
   });
 
-  it('manipulierter Ciphertext wird abgelehnt und beschädigt die Ratchet-Kette nicht', async () => {
+  it('tampered ciphertext is rejected and does not damage the ratchet chain', async () => {
     const { alice, bob } = establishSession();
-    const m1 = await enc(alice, 'echte nachricht');
+    const m1 = await enc(alice, 'real message');
 
     const tampered: RatchetMessage = { header: m1.header, ct: b64.enc(flipByte(b64.dec(m1.ct))) };
     await expect(bob.decrypt(tampered)).rejects.toThrow();
 
-    // Die echte Nachricht muss danach immer noch entschlüsselbar sein —
-    // der fehlgeschlagene Versuch darf den State nicht verändert haben.
-    expect(await dec(bob, m1)).toBe('echte nachricht');
+    // The real message must still be decryptable afterwards —
+    // the failed attempt must not have changed the state.
+    expect(await dec(bob, m1)).toBe('real message');
   });
 
-  it('gefälschter Header mit beliebigem DH-Public-Key wird abgelehnt und zerstört die Sitzung nicht (P0)', async () => {
+  it('a forged header with an arbitrary DH public key is rejected and does not destroy the session (P0)', async () => {
     const { alice, bob } = establishSession();
-    const legit = await enc(alice, 'legitime nachricht 1');
+    const legit = await enc(alice, 'legit message 1');
 
-    // Angreifer fälscht eine Nachricht mit frei gewähltem DH-Key im Header — das würde
-    // vor dem Fix einen ungeprüften vollständigen DH-Ratchet-Schritt auslösen und Bobs
-    // echten Sitzungsstand (inkl. seines eigenen neuen Ephemeral-Keys) zerstören.
+    // An attacker forges a message with a freely chosen DH key in the header — before
+    // the fix this would trigger an unchecked full DH ratchet step and destroy Bob's
+    // real session state (incl. his own new ephemeral key).
     const forgedDh = newX25519();
     const forged: RatchetMessage = {
       header: { dh: b64.enc(forgedDh.pub), pn: 0, n: 0 },
@@ -224,13 +224,13 @@ describe('Double Ratchet — Replay- und Tamper-Schutz (P0-Regressionstest)', ()
     };
     await expect(bob.decrypt(forged)).rejects.toThrow();
 
-    // Bobs Sitzung muss danach unverändert funktionieren
-    expect(await dec(bob, legit)).toBe('legitime nachricht 1');
-    const reply = await enc(bob, 'antwort von bob');
-    expect(await dec(alice, reply)).toBe('antwort von bob');
+    // Bob's session must still work unchanged afterwards
+    expect(await dec(bob, legit)).toBe('legit message 1');
+    const reply = await enc(bob, 'reply from bob');
+    expect(await dec(alice, reply)).toBe('reply from bob');
   });
 
-  it('mehrere aufeinanderfolgende Angriffsversuche verhindern nicht die weitere Kommunikation', async () => {
+  it('several consecutive attack attempts do not prevent further communication', async () => {
     const { alice, bob } = establishSession();
     const legit1 = await enc(alice, 'ok-1');
     expect(await dec(bob, legit1)).toBe('ok-1');
@@ -248,59 +248,59 @@ describe('Double Ratchet — Replay- und Tamper-Schutz (P0-Regressionstest)', ()
   });
 });
 
-describe('Double Ratchet — Gleichzeitiges Senden / DH-Ratchet', () => {
-  it('beide Seiten senden "gleichzeitig", bevor sie die jeweils neueste Nachricht der Gegenseite sehen', async () => {
+describe('Double Ratchet — simultaneous send / DH ratchet', () => {
+  it('both sides send "simultaneously" before they see each other\'s latest message', async () => {
     const { alice, bob } = establishSession();
 
-    // Sitzung erst bidirektional aufbauen: Bob kann protokollbedingt erst senden,
-    // nachdem er eine erste Nachricht von Alice erhalten (und damit CKs abgeleitet) hat.
+    // First build the session bidirectionally: by protocol Bob can only send
+    // after he has received a first message from Alice (and thus derived CKs).
     expect(await dec(bob, await enc(alice, 'init'))).toBe('init');
-    expect(await dec(alice, await enc(bob, 'erste antwort'))).toBe('erste antwort');
+    expect(await dec(alice, await enc(bob, 'first reply'))).toBe('first reply');
 
-    // Jetzt senden beide "gleichzeitig", jeweils ohne die neueste Nachricht der
-    // Gegenseite gesehen zu haben (klassisches Double-Ratchet-Crossing-Szenario).
-    const aliceMsg = await enc(alice, 'von alice, parallel');
-    const bobMsg = await enc(bob, 'von bob, parallel');
+    // Now both send "simultaneously", each without having seen the other side's
+    // latest message (the classic Double Ratchet crossing scenario).
+    const aliceMsg = await enc(alice, 'from alice, parallel');
+    const bobMsg = await enc(bob, 'from bob, parallel');
 
-    expect(await dec(bob, aliceMsg)).toBe('von alice, parallel');
-    expect(await dec(alice, bobMsg)).toBe('von bob, parallel');
+    expect(await dec(bob, aliceMsg)).toBe('from alice, parallel');
+    expect(await dec(alice, bobMsg)).toBe('from bob, parallel');
 
-    // Konversation muss danach normal weiterlaufen (neue DH-Ratchets auf beiden Seiten)
-    const follow1 = await enc(alice, 'weiter gehts');
-    expect(await dec(bob, follow1)).toBe('weiter gehts');
-    const follow2 = await enc(bob, 'ja klar');
-    expect(await dec(alice, follow2)).toBe('ja klar');
+    // The conversation must continue normally afterwards (new DH ratchets on both sides)
+    const follow1 = await enc(alice, 'keep going');
+    expect(await dec(bob, follow1)).toBe('keep going');
+    const follow2 = await enc(bob, 'sure');
+    expect(await dec(alice, follow2)).toBe('sure');
   });
 
-  it('DH-Ratchet-Schritt erzeugt neue Kettenschlüssel (Forward Secrecy zwischen Epochen)', async () => {
+  it('a DH ratchet step produces new chain keys (forward secrecy between epochs)', async () => {
     const { alice, bob } = establishSession();
     const before = alice.publicKey.slice();
 
     const a1 = await enc(alice, 'a1');
-    await dec(bob, a1); // Bob leitet jetzt seine eigene Sendekette ab
-    const b1 = await enc(bob, 'b1'); // löst bei Alice beim Empfang einen DH-Ratchet aus
+    await dec(bob, a1); // Bob now derives his own sending chain
+    const b1 = await enc(bob, 'b1'); // triggers a DH ratchet at Alice on receipt
     await dec(alice, b1);
 
     expect(b64.enc(alice.publicKey)).not.toBe(b64.enc(before));
   });
 });
 
-describe('Double Ratchet — Session-Restore / Geräte-Neustart', () => {
-  it('Sitzung überlebt Snapshot -> Neustart -> Restore ohne Nachrichtenverlust', async () => {
+describe('Double Ratchet — session restore / device restart', () => {
+  it('the session survives snapshot -> restart -> restore without message loss', async () => {
     const { alice, bob } = establishSession();
-    await dec(bob, await enc(alice, 'vor dem neustart'));
+    await dec(bob, await enc(alice, 'before restart'));
 
     const bobSnapshot = bob.toSnapshot();
     const bobRestored = Ratchet.fromSnapshot(bobSnapshot);
 
-    const afterRestart = await enc(alice, 'nach dem neustart');
-    expect(await dec(bobRestored, afterRestart)).toBe('nach dem neustart');
+    const afterRestart = await enc(alice, 'after restart');
+    expect(await dec(bobRestored, afterRestart)).toBe('after restart');
 
-    const reply = await enc(bobRestored, 'bob ist zurück');
-    expect(await dec(alice, reply)).toBe('bob ist zurück');
+    const reply = await enc(bobRestored, 'bob is back');
+    expect(await dec(alice, reply)).toBe('bob is back');
   });
 
-  it('restaurierte Sitzung verarbeitet weiterhin Out-of-Order-Nachrichten korrekt', async () => {
+  it('a restored session still processes out-of-order messages correctly', async () => {
     const { alice, bob } = establishSession();
     await dec(bob, await enc(alice, 'init'));
 
@@ -314,16 +314,16 @@ describe('Double Ratchet — Session-Restore / Geräte-Neustart', () => {
     expect(await dec(restored, m2)).toBe('x2');
   });
 
-  it('Snapshot ist unabhängig von der Originalinstanz (keine gemeinsame Mutation)', async () => {
+  it('a snapshot is independent of the original instance (no shared mutation)', async () => {
     const { alice, bob } = establishSession();
     const snap = bob.toSnapshot();
     const clone = Ratchet.fromSnapshot(snap);
 
-    const m1 = await enc(alice, 'nur für original');
+    const m1 = await enc(alice, 'only for the original');
     await dec(bob, m1);
 
-    // Der Klon, der vor dieser Nachricht erstellt wurde, darf durch das Entschlüsseln
-    // im Original nicht verändert worden sein (kein Aliasing von Uint8Arrays/Maps).
+    // The clone created before this message must not have been changed by decrypting
+    // in the original (no aliasing of Uint8Arrays/Maps).
     const snap2 = clone.toSnapshot();
     expect(snap2.nr).toBe(snap.nr);
   });

@@ -26,30 +26,30 @@ beforeEach(() => {
   lockVault();
 });
 
-describe('Vault — Grundfunktionen', () => {
-  it('erstellt und entsperrt mit dem richtigen Passwort', async () => {
-    await createVault<Data>('korrektes-passwort-123', null, { secret: 'x' });
+describe('Vault — basic functions', () => {
+  it('creates and unlocks with the correct password', async () => {
+    await createVault<Data>('correct-password-123', null, { secret: 'x' });
     lockVault();
-    const res = await unlockVault<Data>('korrektes-passwort-123');
+    const res = await unlockVault<Data>('correct-password-123');
     expect(res.ok).toBe(true);
     if (res.ok && !res.duress) expect(res.data.secret).toBe('x');
   });
 
-  it('lehnt ein falsches Passwort ab', async () => {
-    await createVault<Data>('richtig', null, { secret: 'x' });
+  it('rejects a wrong password', async () => {
+    await createVault<Data>('right', null, { secret: 'x' });
     lockVault();
-    const res = await unlockVault<Data>('falsch');
+    const res = await unlockVault<Data>('wrong');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('wrong-pass');
   });
 
-  it('meldet einen fehlenden Vault korrekt', async () => {
-    const res = await unlockVault('irgendwas');
+  it('reports a missing vault correctly', async () => {
+    const res = await unlockVault('anything');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('missing');
   });
 
-  it('vaultExists/isUnlocked spiegeln den tatsaechlichen Zustand wider', async () => {
+  it('vaultExists/isUnlocked reflect the actual state', async () => {
     expect(vaultExists()).toBe(false);
     expect(isUnlocked()).toBe(false);
     await createVault<Data>('pw', null, { secret: 'x' });
@@ -60,34 +60,34 @@ describe('Vault — Grundfunktionen', () => {
   });
 });
 
-describe('Vault — Duress-PIN', () => {
-  it('mit konfiguriertem Duress-PIN liefert der Duress-PIN duress:true ohne Daten preiszugeben', async () => {
-    await createVault<Data>('echtes-passwort', '1234', { secret: 'geheim' });
+describe('Vault — duress PIN', () => {
+  it('with a configured duress PIN, the duress PIN yields duress:true without revealing data', async () => {
+    await createVault<Data>('real-password', '1234', { secret: 'secret' });
     lockVault();
     expect(hasDuressPin()).toBe(true);
 
     const duressRes = await unlockVault<Data>('1234');
     expect(duressRes.ok).toBe(true);
     if (duressRes.ok) expect(duressRes.duress).toBe(true);
-    // Im Duress-Fall duerfen keine echten Daten im Ergebnis stehen.
+    // In the duress case no real data may be present in the result.
     expect((duressRes as any).data).toBeUndefined();
 
-    const realRes = await unlockVault<Data>('echtes-passwort');
+    const realRes = await unlockVault<Data>('real-password');
     expect(realRes.ok).toBe(true);
-    if (realRes.ok && !realRes.duress) expect(realRes.data.secret).toBe('geheim');
+    if (realRes.ok && !realRes.duress) expect(realRes.data.secret).toBe('secret');
   });
 
-  it('ein falsches Passwort wird nicht faelschlich als Duress erkannt', async () => {
-    await createVault<Data>('echtes-passwort', '1234', { secret: 'geheim' });
+  it('a wrong password is not falsely detected as duress', async () => {
+    await createVault<Data>('real-password', '1234', { secret: 'secret' });
     lockVault();
-    const res = await unlockVault<Data>('irgendwas-anderes');
+    const res = await unlockVault<Data>('something-else');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('wrong-pass');
   });
 });
 
-describe('Vault — Integritaet / Tamper-Erkennung', () => {
-  it('erkennt eine manipulierte Vault-Datei beim Entsperren', async () => {
+describe('Vault — integrity / tamper detection', () => {
+  it('detects a tampered vault file on unlock', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     lockVault();
     demoTamperVault();
@@ -96,32 +96,32 @@ describe('Vault — Integritaet / Tamper-Erkennung', () => {
     if (!res.ok) expect(res.reason).toBe('tampered');
   });
 
-  it('checkIntegrity erkennt Manipulation im laufenden (entsperrten) Zustand', async () => {
+  it('checkIntegrity detects tampering in the running (unlocked) state', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     expect(checkIntegrity()).toBe('ok');
     demoTamperVault();
     expect(checkIntegrity()).toBe('tampered');
   });
 
-  it('saveVault aktualisiert MAC/Daten konsistent, sodass danach wieder ok ist', async () => {
-    await createVault<Data>('pw', null, { secret: 'alt' });
-    await saveVault<Data>({ secret: 'neu' });
+  it('saveVault updates MAC/data consistently, so it is ok again afterwards', async () => {
+    await createVault<Data>('pw', null, { secret: 'old' });
+    await saveVault<Data>({ secret: 'new' });
     expect(checkIntegrity()).toBe('ok');
     lockVault();
     const res = await unlockVault<Data>('pw');
-    if (res.ok && !res.duress) expect(res.data.secret).toBe('neu');
+    if (res.ok && !res.duress) expect(res.data.secret).toBe('new');
   });
 });
 
-describe('Vault — Sperren / Zerstoeren', () => {
-  it('lockVault entfernt den Zugriff auf den Master-Key', async () => {
+describe('Vault — lock / destroy', () => {
+  it('lockVault removes access to the master key', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     expect(isUnlocked()).toBe(true);
     lockVault();
     expect(isUnlocked()).toBe(false);
   });
 
-  it('destroyVault entfernt die Vault-Datei vollstaendig', async () => {
+  it('destroyVault removes the vault file completely', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     destroyVault();
     expect(vaultExists()).toBe(false);
@@ -131,22 +131,22 @@ describe('Vault — Sperren / Zerstoeren', () => {
   });
 });
 
-describe('Vault — Rollback-Schutz (STORAGE-ROLLBACK)', () => {
+describe('Vault — rollback protection (STORAGE-ROLLBACK)', () => {
   const ls = () => (globalThis as unknown as { localStorage: MemoryStorage }).localStorage;
   const LS_KEY = 'renkervault.vault.v1';
 
-  it('lehnt das Wiedereinspielen einer aelteren, aber gueltig signierten Vault-Version ab', async () => {
+  it('rejects replaying an older but validly signed vault version', async () => {
     await createVault<Data>('pw', null, { secret: 'v1' });
     const oldSnapshot = ls().getItem(LS_KEY)!;
     lockVault();
 
-    // Normale Weiterentwicklung: mehrere echte saveVault()-Aufrufe (Generation steigt).
+    // Normal progression: several real saveVault() calls (generation increases).
     await unlockVault<Data>('pw');
     await saveVault<Data>({ secret: 'v2' });
     lockVault();
 
-    // Angreifer spielt den ALTEN, aber weiterhin authentisch signierten
-    // Snapshot zurueck (z. B. aus einem isoliert exfiltrierten Backup).
+    // Attacker replays the OLD but still authentically signed
+    // snapshot (e.g. from a separately exfiltrated backup).
     ls().setItem(LS_KEY, oldSnapshot);
 
     const res = await unlockVault<Data>('pw');
@@ -154,7 +154,7 @@ describe('Vault — Rollback-Schutz (STORAGE-ROLLBACK)', () => {
     if (!res.ok) expect(res.reason).toBe('tampered');
   });
 
-  it('erlaubt normales Fortschreiben ueber mehrere saveVault()-Aufrufe', async () => {
+  it('allows normal progression over several saveVault() calls', async () => {
     await createVault<Data>('pw', null, { secret: 'v1' });
     await saveVault<Data>({ secret: 'v2' });
     await saveVault<Data>({ secret: 'v3' });
@@ -165,7 +165,7 @@ describe('Vault — Rollback-Schutz (STORAGE-ROLLBACK)', () => {
     if (res.ok && !res.duress) expect(res.data.secret).toBe('v3');
   });
 
-  it('speichert eine steigende Generation bei jedem saveVault()-Aufruf', async () => {
+  it('stores an increasing generation on every saveVault() call', async () => {
     await createVault<Data>('pw', null, { secret: 'v1' });
     expect(JSON.parse(ls().getItem(LS_KEY)!).generation).toBe(1);
     await saveVault<Data>({ secret: 'v2' });
@@ -174,27 +174,27 @@ describe('Vault — Rollback-Schutz (STORAGE-ROLLBACK)', () => {
     expect(JSON.parse(ls().getItem(LS_KEY)!).generation).toBe(3);
   });
 
-  it('eine Datei ohne generation-Feld (Alt-Format) wird als solche erkannt statt zum Absturz zu führen', async () => {
+  it('a file without a generation field (old format) is recognized as such instead of crashing', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     const raw = JSON.parse(ls().getItem(LS_KEY)!);
     delete raw.generation;
     lockVault();
     ls().setItem(LS_KEY, JSON.stringify(raw));
 
-    // Der gespeicherte MAC wurde mit Generation im Input berechnet (createVault
-    // signiert bereits im neuen Format) — ein Alt-Format-Leseversuch mit dem
-    // alten (generationslosen) Schema muss daher kontrolliert als "tampered"
-    // erkannt werden, nicht crashen. Die eigentliche Migrationslogik (echte
-    // Alt-Dateien mit passend altem MAC werden transparent hochgezogen) ist
-    // durch Code-Review abgedeckt, aber mangels Zugriffs auf den internen
-    // Master-Key von außerhalb des Moduls hier nicht isoliert nachstellbar.
+    // The stored MAC was computed with the generation in the input (createVault
+    // already signs in the new format) — an old-format read attempt with the
+    // old (generation-less) schema must therefore be recognized in a controlled
+    // way as "tampered", not crash. The actual migration logic (real old files
+    // with a matching old MAC are transparently upgraded) is covered by code
+    // review, but for lack of access to the internal master key from outside the
+    // module it cannot be reproduced in isolation here.
     const res = await unlockVault<Data>('pw');
     expect(res.ok).toBe(false);
   });
 });
 
-describe('Vault + Ratchet — sofortige Persistierung nach State-Änderung (RATCHET-A)', () => {
-  it('ein Snapshot, der unmittelbar nach encrypt() gespeichert wird, spiegelt den fortgeschrittenen State wider', async () => {
+describe('Vault + Ratchet — immediate persistence after state change (RATCHET-A)', () => {
+  it('a snapshot saved immediately after encrypt() reflects the advanced state', async () => {
     const alice = { identity: newX25519(), prekey: newX25519(), pq: newPqKeyPair() };
     const bob = { identity: newX25519(), prekey: newX25519(), pq: newPqKeyPair() };
     const { sk, ephPub, pqCipherText } = handshakeInitiator(
@@ -204,59 +204,59 @@ describe('Vault + Ratchet — sofortige Persistierung nach State-Änderung (RATC
     const ratchet = Ratchet.initAlice(sk, bob.prekey.pub);
     void bobSk;
 
-    await ratchet.encrypt(utf8Codec.enc('erste nachricht'));
-    await ratchet.encrypt(utf8Codec.enc('zweite nachricht'));
+    await ratchet.encrypt(utf8Codec.enc('first message'));
+    await ratchet.encrypt(utf8Codec.enc('second message'));
 
-    // Simuliert exakt das, was die App jetzt nach jedem Send/Receive tut:
-    // Snapshot ziehen und SOFORT (nicht debounced) speichern.
+    // Simulates exactly what the app now does after every send/receive:
+    // take a snapshot and save it IMMEDIATELY (not debounced).
     const snapshotAfterTwo = ratchet.toSnapshot();
     await createVault<{ snap: typeof snapshotAfterTwo }>('pw', null, { snap: snapshotAfterTwo });
     lockVault();
 
-    // "Absturz" direkt danach — die dritte Nachricht existiert nur im
-    // (jetzt verworfenen) In-Memory-State, nie im Vault gelandet.
+    // A "crash" right after — the third message exists only in the
+    // (now discarded) in-memory state, never persisted to the vault.
     const res = await unlockVault<{ snap: typeof snapshotAfterTwo }>('pw');
     expect(res.ok).toBe(true);
     if (res.ok && !res.duress) {
-      // Der geladene Snapshot muss den Stand NACH den zwei echten encrypt()-
-      // Aufrufen zeigen (ns=2), nicht einen veralteten Vor-Zustand — das
-      // beweist, dass eine sofortige (statt verzögerte) Persistierung nach
-      // jeder State-Änderung keine bereits genutzten Message-Keys verliert.
+      // The loaded snapshot must show the state AFTER the two real encrypt()
+      // calls (ns=2), not a stale prior state — this proves that immediate
+      // (instead of delayed) persistence after every state change does not
+      // lose already-used message keys.
       expect(res.data.snap.ns).toBe(2);
     }
   });
 });
 
-describe('Vault — Passphrase ändern', () => {
-  it('ändert die Passphrase erfolgreich, Daten bleiben unter dem neuen Passwort lesbar', async () => {
-    await createVault<Data>('alt-passwort', null, { secret: 'geheim' });
-    const res = await changePassphrase('alt-passwort', 'neu-passwort-456');
+describe('Vault — change passphrase', () => {
+  it('changes the passphrase successfully, data stays readable under the new password', async () => {
+    await createVault<Data>('old-password', null, { secret: 'secret' });
+    const res = await changePassphrase('old-password', 'new-password-456');
     expect(res.ok).toBe(true);
     lockVault();
 
-    const oldRes = await unlockVault<Data>('alt-passwort');
+    const oldRes = await unlockVault<Data>('old-password');
     expect(oldRes.ok).toBe(false);
 
-    const newRes = await unlockVault<Data>('neu-passwort-456');
+    const newRes = await unlockVault<Data>('new-password-456');
     expect(newRes.ok).toBe(true);
-    if (newRes.ok && !newRes.duress) expect(newRes.data.secret).toBe('geheim');
+    if (newRes.ok && !newRes.duress) expect(newRes.data.secret).toBe('secret');
   });
 
-  it('lehnt eine falsche alte Passphrase ab, ohne etwas zu verändern', async () => {
-    await createVault<Data>('alt-passwort', null, { secret: 'geheim' });
-    const res = await changePassphrase('falsches-passwort', 'neu-passwort-456');
+  it('rejects a wrong old passphrase without changing anything', async () => {
+    await createVault<Data>('old-password', null, { secret: 'secret' });
+    const res = await changePassphrase('wrong-password', 'new-password-456');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('wrong-pass');
     lockVault();
 
-    const stillOldRes = await unlockVault<Data>('alt-passwort');
+    const stillOldRes = await unlockVault<Data>('old-password');
     expect(stillOldRes.ok).toBe(true);
   });
 
-  it('verweigert die Änderung, wenn der Tresor gesperrt ist', async () => {
+  it('refuses the change when the vault is locked', async () => {
     await createVault<Data>('pw', null, { secret: 'x' });
     lockVault();
-    const res = await changePassphrase('pw', 'neues-pw-123');
+    const res = await changePassphrase('pw', 'new-pw-123');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('locked');
   });
