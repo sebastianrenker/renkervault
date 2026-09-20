@@ -12,21 +12,21 @@ export function AddContactModal(props: {
   return (
     <div className="modal-back" onClick={props.onClose}>
       <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-        <h3>◉ Echten Kontakt hinzufügen</h3>
+        <h3>◉ Add a real contact</h3>
         <p className="gate-info">
-          Gib die Konto-ID deines Gegenübers ein (z. B. <span className="mono">RV-771F-11D3</span>).
-          RenkerVault fragt den Relay nach dem öffentlichen Schlüssel und
-          baut sofort eine echte Ende-zu-Ende-Sitzung auf (X3DH-lite → Double
-          Ratchet). Beide Seiten müssen mit demselben Relay verbunden sein.
+          Enter your counterpart's account ID (e.g. <span className="mono">RV-771F-11D3</span>).
+          RenkerVault asks the relay for the public key and
+          immediately establishes a real end-to-end session (X3DH-lite → Double
+          Ratchet). Both sides must be connected to the same relay.
         </p>
-        <label>Konto-ID</label>
+        <label>Account ID</label>
         <input
           className="input mono" placeholder="RV-XXXX-XXXX" value={userId}
           onChange={(e) => setUserId(e.target.value.toUpperCase())}
           autoFocus
         />
-        <label>Anzeigename für diesen Kontakt</label>
-        <input className="input" placeholder="z. B. Nadja" value={name} onChange={(e) => setName(e.target.value)}
+        <label>Display name for this contact</label>
+        <input className="input" placeholder="e.g. Nadja" value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && userId && props.onSubmit(userId.trim(), name.trim())} />
         {props.error && <div className="gate-err">✖ {props.error}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -34,9 +34,9 @@ export function AddContactModal(props: {
             className="btn solid" disabled={props.busy || !userId.trim()}
             onClick={() => props.onSubmit(userId.trim(), name.trim())}
           >
-            {props.busy ? 'Suche im Relay…' : 'Kontakt suchen & verbinden'}
+            {props.busy ? 'Searching the relay…' : 'Find contact & connect'}
           </button>
-          <button className="btn ghost" onClick={props.onClose}>Abbrechen</button>
+          <button className="btn ghost" onClick={props.onClose}>Cancel</button>
         </div>
       </div>
     </div>
@@ -64,18 +64,18 @@ export function CreateGroupModal(props: {
   return (
     <div className="modal-back" onClick={props.onClose}>
       <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-        <h3>⬡ Echte Gruppe erstellen</h3>
-        <label>Gruppenname</label>
+        <h3>⬡ Create a real group</h3>
+        <label>Group name</label>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         <p className="gate-info tiny">
-          Der Gruppenschlüssel wird für jedes ausgewählte Mitglied einzeln über
-          eure bestehende 1:1-Sitzung verteilt (Sender-Keys-lite). Es können
-          nur bereits hinzugefügte Kontakte eingeladen werden.
+          The group key is distributed to each selected member individually over
+          your existing 1:1 session (sender-keys-lite). Only
+          already-added contacts can be invited.
         </p>
         {props.contacts.length === 0 ? (
           <p className="dim tiny">
-            Noch keine echten Kontakte vorhanden. Füge zuerst über „Kontakte" →
-            „Kontakt hinzufügen" jemanden hinzu.
+            No real contacts yet. First add someone via "Contacts" →
+            "Add contact".
           </p>
         ) : (
           props.contacts.map((c) => (
@@ -89,7 +89,7 @@ export function CreateGroupModal(props: {
                 style={{ marginLeft: 'auto' }}
                 onClick={() => toggle(c.userId)}
               >
-                {selected.has(c.userId) ? '✔ Ausgewählt' : 'Einladen'}
+                {selected.has(c.userId) ? '✔ Selected' : 'Invite'}
               </button>
             </div>
           ))
@@ -100,9 +100,9 @@ export function CreateGroupModal(props: {
             className="btn solid" disabled={props.busy || !name.trim() || selected.size === 0}
             onClick={() => props.onSubmit(name.trim(), [...selected])}
           >
-            {props.busy ? 'Erzeuge Gruppenschlüssel…' : `Gruppe erstellen (${selected.size} eingeladen)`}
+            {props.busy ? 'Generating group key…' : `Create group (${selected.size} invited)`}
           </button>
-          <button className="btn ghost" onClick={props.onClose}>Abbrechen</button>
+          <button className="btn ghost" onClick={props.onClose}>Cancel</button>
         </div>
       </div>
     </div>

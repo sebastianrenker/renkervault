@@ -56,12 +56,12 @@ function ev(severity: SecEvent['severity'], kind: string, text: string, device?:
 }
 
 function lastMessagePreview(messages: Message[] | undefined): string {
-  if (!messages || messages.length === 0) return 'Keine Nachrichten';
+  if (!messages || messages.length === 0) return 'No messages';
   const m = messages[messages.length - 1];
   if (m.kind === 'system') return m.body;
-  if (m.deleted) return '🗑 Nachricht gelöscht';
-  if (m.kind === 'file') return `📎 ${m.fileName ?? 'Anhang'}`;
-  return (m.own ? 'Du: ' : '') + m.body;
+  if (m.deleted) return '🗑 Message deleted';
+  if (m.kind === 'file') return `📎 ${m.fileName ?? 'Attachment'}`;
+  return (m.own ? 'You: ' : '') + m.body;
 }
 
 function playSiren() {
@@ -208,12 +208,11 @@ export default function App() {
     });
   }, []);
 
-  // Persistiert Ratchet-/Gruppenschlüssel-Fortschritt sofort statt auf das
-  // 400ms-Debounce der generischen setData-Persistierung zu warten. Ohne das
-  // könnte ein Absturz zwischen einer bereits verschickten/verarbeiteten
-  // Nachricht und der verzögerten Speicherung dazu führen, dass nach einem
-  // Neustart ein bereits benutzter Message-Key erneut verwendet wird (siehe
-  // SECURITY_AUDIT.md, Fund RATCHET-A).
+  // Persists ratchet/group-key progress immediately instead of waiting for the
+  // 400ms debounce of the generic setData persistence. Without this, a crash
+  // between an already-sent/processed message and the delayed save could cause
+  // an already-used message key to be reused after a restart (see
+  // SECURITY_AUDIT.md, finding RATCHET-A).
   const persistRealSessions = useCallback(() => {
     setData((d) => {
       if (!d) return d;
@@ -251,30 +250,30 @@ export default function App() {
 
     const from = rawFrom ?? (envelope.tag ? realChat.resolvePeerByTag(envelope.tag) : undefined);
     if (!from) {
-      log(ev('warn', 'UNKNOWN_SENDER', 'Nachricht mit nicht auflösbarem Sealed-Sender-Tag verworfen'));
+      log(ev('warn', 'UNKNOWN_SENDER', 'Message with an unresolvable sealed-sender tag discarded'));
       return;
     }
 
     if (envelope.kind === 'group-key') {
       if (!realChat.hasSession(from)) {
-        log(ev('warn', 'GROUP_KEY_UNKNOWN', `Gruppenschlüssel von unbekanntem Absender ${from} ignoriert`));
+        log(ev('warn', 'GROUP_KEY_UNKNOWN', `Group key from unknown sender ${from} ignored`));
         return;
       }
       let plaintext: Uint8Array;
       try { plaintext = await realChat.decryptDirect(from, envelope); }
-      catch { log(ev('warn', 'RATCHET_FAIL', `Gruppenschlüssel von ${from} konnte nicht entschlüsselt werden`)); return; }
+      catch { log(ev('warn', 'RATCHET_FAIL', `Group key from ${from} could not be decrypted`)); return; }
       let payload: { groupId: string; groupName: string; epoch: number; key: string; members: Member[] };
       try { payload = JSON.parse(utf8.dec(plaintext)); } catch { return; }
       const fp = realChat.applyGroupKey(payload.groupId, payload.key, payload.epoch);
       if (fp === null) {
         log(ev('alert', 'GROUP_KEY_REPLAY',
-          `Veralteter Gruppenschlüssel für „${payload.groupName}" (Epoche ${payload.epoch}) verworfen — möglicher Replay-Versuch`));
+          `Outdated group key for "${payload.groupName}" (epoch ${payload.epoch}) discarded — possible replay attempt`));
         return;
       }
       setData((cur) => {
         if (!cur) return cur;
         const exists = cur.chats.find((c) => c.id === payload.groupId);
-        const sub = `${payload.members.length} Mitglieder · E2E (Epoche ${payload.epoch})`;
+        const sub = `${payload.members.length} members · E2E (epoch ${payload.epoch})`;
         const chat: Chat = exists
           ? { ...exists, epoch: payload.epoch, shortFp: fp, keyRotatedAt: Date.now(), members: payload.members, sub }
           : {
@@ -286,7 +285,7 @@ export default function App() {
         const messages = cur.messages[chat.id] ? cur.messages : { ...cur.messages, [chat.id]: [] };
         return { ...cur, chats, messages };
       });
-      log(ev('info', 'KEY_ROTATION', `Gruppenschlüssel für „${payload.groupName}" empfangen (Epoche ${payload.epoch})`));
+      log(ev('info', 'KEY_ROTATION', `Group key for "${payload.groupName}" received (epoch ${payload.epoch})`));
       persistRealSessions();
       return;
     }
@@ -296,18 +295,18 @@ export default function App() {
       let isNew = false;
       if (realChat.hasSession(from)) {
         try { plaintext = await realChat.decryptDirect(from, envelope); }
-        catch { log(ev('warn', 'RATCHET_FAIL', `Nachricht von ${from} konnte nicht entschlüsselt werden`)); return; }
+        catch { log(ev('warn', 'RATCHET_FAIL', `Message from ${from} could not be decrypted`)); return; }
       } else {
         if (!envelope.x3dh) {
-          log(ev('warn', 'UNKNOWN_SENDER', `Nachricht von unbekanntem Absender ${from} ohne Handshake-Info ignoriert`));
+          log(ev('warn', 'UNKNOWN_SENDER', `Message from unknown sender ${from} without handshake info ignored`));
           return;
         }
         if (!envelope.x3dh.otpkId && realChat.oneTimePrekeyCount() > 0) {
           log(ev('warn', 'X3DH_DOWNGRADE',
-            `Eingehende Sitzung von ${from} verhandelt ohne One-Time-Prekey, obwohl eigene OTPKs verfügbar sind — möglicher Hinweis auf einen manipulierenden Relay.`));
+            `Incoming session from ${from} negotiated without a one-time prekey although own OTPKs are available — possible sign of a tampering relay.`));
         }
         try { plaintext = await realChat.acceptFirstMessage(myIdentity, from, envelope); }
-        catch { log(ev('warn', 'HANDSHAKE_FAIL', `Handshake mit ${from} fehlgeschlagen`)); return; }
+        catch { log(ev('warn', 'HANDSHAKE_FAIL', `Handshake with ${from} failed`)); return; }
         isNew = true;
       }
 
@@ -327,7 +326,7 @@ export default function App() {
           if (!cur) return cur;
           const chatExists = cur.chats.some((c) => c.id === from);
           const chat: Chat = {
-            id: from, kind: 'direct', origin: 'real', name, sub: 'Neue Kontaktanfrage',
+            id: from, kind: 'direct', origin: 'real', name, sub: 'New contact request',
             members: [
               { id: myIdentity.userId, name: myIdentity.displayName, role: 'member' },
               { id: from, name, role: 'member' },
@@ -342,7 +341,7 @@ export default function App() {
             messages: cur.messages[from] ? cur.messages : { ...cur.messages, [from]: [] },
           };
         });
-        log(ev('warn', 'NEW_CONTACT', `Neue Kontaktanfrage von ${name} (${from})`));
+        log(ev('warn', 'NEW_CONTACT', `New contact request from ${name} (${from})`));
       } else {
         updateContactPresence(from, { online: true, lastSeen: envelope.ts || Date.now() });
       }
@@ -444,7 +443,7 @@ export default function App() {
       let plaintext: Uint8Array;
       try { plaintext = await realChat.decryptGroup(envelope.chatId, envelope.ct); }
       catch {
-        log(ev('warn', 'GROUP_DECRYPT_FAIL', `Gruppennachricht in „${envelope.chatId}" nicht entschlüsselbar (fehlender Epoch-Key?)`));
+        log(ev('warn', 'GROUP_DECRYPT_FAIL', `Group message in "${envelope.chatId}" not decryptable (missing epoch key?)`));
         return;
       }
 
@@ -514,7 +513,7 @@ export default function App() {
       const offer = await session.createOffer();
       await sendCallSignal(peerId, 'call-offer', { callId, kind, sdp: offer.sdp });
     } catch (e) {
-      log(ev('warn', 'CALL_FAIL', `Anruf an ${peerName} fehlgeschlagen: ${e instanceof Error ? e.message : 'Medienzugriff verweigert'}`));
+      log(ev('warn', 'CALL_FAIL', `Call to ${peerName} failed: ${e instanceof Error ? e.message : 'Media access denied'}`));
       session.close();
       callSessionRef.current = null;
       setCall(null);
@@ -538,7 +537,7 @@ export default function App() {
       const answer = await session.createAnswer(c.pendingOfferSdp);
       await sendCallSignal(c.peerId, 'call-answer', { callId: c.callId, sdp: answer.sdp });
     } catch (e) {
-      log(ev('warn', 'CALL_FAIL', `Anruf konnte nicht angenommen werden: ${e instanceof Error ? e.message : 'Medienzugriff verweigert'}`));
+      log(ev('warn', 'CALL_FAIL', `Could not accept the call: ${e instanceof Error ? e.message : 'Media access denied'}`));
       session.close();
       callSessionRef.current = null;
       setCall(null);
@@ -640,17 +639,17 @@ export default function App() {
       },
       onSecurityEvent: (kind, detail, _ts) => {
         if (kind === 'auth-fail') {
-          log(ev('warn', 'AUTH_FAIL', `Fehlgeschlagener Anmeldeversuch (${detail.attempts ?? '?'}/5)`, String(detail.device ?? '')));
+          log(ev('warn', 'AUTH_FAIL', `Failed sign-in attempt (${detail.attempts ?? '?'}/5)`, String(detail.device ?? '')));
         } else if (kind === 'lockout') {
-          triggerAlarm('BRUTE_FORCE', `Konto-Lockout: zu viele Fehlversuche (${detail.seconds ?? 60}s Sperre)`);
+          triggerAlarm('BRUTE_FORCE', `Account lockout: too many failed attempts (${detail.seconds ?? 60}s lock)`);
         } else if (kind === 'new-device') {
-          log(ev('warn', 'NEW_DEVICE', `Neues Gerät „${detail.name ?? detail.deviceId}" wartet auf manuelle Bestätigung`, String(detail.name ?? '')));
+          log(ev('warn', 'NEW_DEVICE', `New device "${detail.name ?? detail.deviceId}" awaiting manual confirmation`, String(detail.name ?? '')));
         } else if (kind === 'key-mismatch') {
-          triggerAlarm('KEY_MISMATCH', 'Gerät meldet sich mit ANDEREM Schlüssel — möglicher Angriff');
+          triggerAlarm('KEY_MISMATCH', 'Device signs in with a DIFFERENT key — possible attack');
         } else if (kind === 'device-approved') {
-          log(ev('info', 'DEVICE_OK', `Gerät bestätigt: ${detail.name ?? detail.deviceId}`));
+          log(ev('info', 'DEVICE_OK', `Device confirmed: ${detail.name ?? detail.deviceId}`));
         } else if (kind === 'device-revoked') {
-          log(ev('info', 'DEVICE_REVOKED', `Gerät abgemeldet: ${detail.deviceId}`));
+          log(ev('info', 'DEVICE_REVOKED', `Device signed out: ${detail.deviceId}`));
         }
       },
       onDevices: (list) =>
@@ -659,7 +658,7 @@ export default function App() {
           current: d.current, createdAt: d.createdAt, lastSeen: d.lastSeen,
         }))),
       onRevoked: () => {
-        triggerAlarm('SESSION_REVOKED', 'Diese Sitzung wurde remote abgemeldet', { lockdown: true });
+        triggerAlarm('SESSION_REVOKED', 'This session was signed out remotely', { lockdown: true });
       },
       onDeliver: (from, envelope) => { void handleDeliver(from, envelope); },
     });
@@ -689,7 +688,7 @@ export default function App() {
         pqPrekeyPriv: b64.enc(pqPrekey.secretKey), pqPrekeyPub: b64.enc(pqPrekey.publicKey),
         prekeySig: b64.enc(edSign(prekey.pub, e.priv)),
         pqPrekeySig: b64.enc(edSign(pqPrekey.publicKey, e.priv)),
-        deviceId: uid('dev-'), deviceName: 'Desktop (dieses Gerät)',
+        deviceId: uid('dev-'), deviceName: 'Desktop (this device)',
       };
       realChat.hydrate({}, {});
       realChat.topUpOneTimePrekeys();
@@ -697,7 +696,7 @@ export default function App() {
       const vault: VaultData = {
         identity, settings: { ...DEFAULT_SETTINGS },
         chats: world.chats, messages: world.messages,
-        secLog: [...world.secLog, ev('info', 'VAULT_UNLOCKED', 'Tresor erstellt und entsperrt')],
+        secLog: [...world.secLog, ev('info', 'VAULT_UNLOCKED', 'Vault created and unlocked')],
         demoPeerKeys: world.peerKeys,
         contacts: {}, sessions: {}, groupKeys: {},
         oneTimePrekeys: realChat.snapshotOneTimePrekeys(),
@@ -729,7 +728,7 @@ export default function App() {
         setData({
           identity: fakeIdentity, settings: { ...DEFAULT_SETTINGS },
           chats: [], messages: {},
-          secLog: [ev('info', 'SESSION', 'Sitzung gestartet')],
+          secLog: [ev('info', 'SESSION', 'Session started')],
           demoPeerKeys: {}, contacts: {}, sessions: {}, groupKeys: {}, oneTimePrekeys: {},
         });
         setDuress(true);
@@ -755,13 +754,13 @@ export default function App() {
           oneTimePrekeys: res.data.oneTimePrekeys ?? {},
           secLog: [
             ...res.data.secLog, ...pendingEvents.current,
-            ev('info', 'VAULT_UNLOCKED', 'Tresor entsperrt — Integrität OK'),
-            ev('info', 'KEY_ROTATION', 'Demo-Sitzungsschlüssel neu etabliert (echte Kontakte/Gruppen unverändert fortgesetzt)'),
+            ev('info', 'VAULT_UNLOCKED', 'Vault unlocked — integrity OK'),
+            ev('info', 'KEY_ROTATION', 'Demo session keys re-established (real contacts/groups continued unchanged)'),
           ],
         };
-        // Migration für Tresore von vor der Prekey-Signatur-Bindung
-        // (PREKEY-SIG): edPriv ist bereits vorhanden, die Signaturen lassen
-        // sich also lokal nachtragen, ohne die Identität neu zu erzeugen.
+        // Migration for vaults from before the prekey-signature binding
+        // (PREKEY-SIG): edPriv is already present, so the signatures can be
+        // added locally without regenerating the identity.
         if (!merged.identity.prekeySig || !merged.identity.pqPrekeySig) {
           const edPriv = b64.dec(merged.identity.edPriv);
           merged.identity = {
@@ -778,30 +777,30 @@ export default function App() {
         return;
       }
       if (res.reason === 'tampered') {
-        triggerAlarm('TAMPER', 'Integritätsprüfung fehlgeschlagen — lokale Datenbank wurde manipuliert', { lockdown: true });
+        triggerAlarm('TAMPER', 'Integrity check failed — local database was tampered with', { lockdown: true });
         return;
       }
       if (res.reason === 'device-mismatch') {
         setDeviceMismatch(true);
-        pendingEvents.current.push(ev('warn', 'DEVICE_MISMATCH', 'Tresor ist an dieses Gerät/Windows-Konto gebunden (DPAPI) — auf einem anderen Gerät nicht entsperrbar, auch mit korrekter Passphrase.'));
+        pendingEvents.current.push(ev('warn', 'DEVICE_MISMATCH', 'Vault is bound to this device/Windows account (DPAPI) — cannot be unlocked on another device, even with the correct passphrase.'));
         return;
       }
       if (res.reason === 'kdf-error') {
-        // Kein Passphrasen-Problem (Argon2id-Ausführung selbst ist
-        // fehlgeschlagen, z. B. zu wenig Arbeitsspeicher) — zählt bewusst
-        // nicht als Fehlversuch, analog zu device-mismatch oben.
+        // Not a passphrase problem (the Argon2id execution itself failed,
+        // e.g. too little memory) — deliberately does not count as a failed
+        // attempt, analogous to device-mismatch above.
         setKdfError(true);
-        pendingEvents.current.push(ev('warn', 'KDF_ERROR', 'Schlüsselableitung (Argon2id) fehlgeschlagen — vermutlich zu wenig Arbeitsspeicher auf diesem Gerät.'));
+        pendingEvents.current.push(ev('warn', 'KDF_ERROR', 'Key derivation (Argon2id) failed — probably too little memory on this device.'));
         return;
       }
       const n = fails + 1;
       setFails(n);
-      pendingEvents.current.push(ev('warn', 'AUTH_FAIL', `Fehlgeschlagener Entsperrversuch (${n}/5)`, 'Desktop (dieses Gerät)'));
-      relayRef.current?.reportUnlockFail('Desktop (dieses Gerät)');
+      pendingEvents.current.push(ev('warn', 'AUTH_FAIL', `Failed unlock attempt (${n}/5)`, 'Desktop (this device)'));
+      relayRef.current?.reportUnlockFail('Desktop (this device)');
       if (n >= 5) {
         setLockedUntil(Date.now() + 60_000);
         setFails(0);
-        triggerAlarm('BRUTE_FORCE', '5 fehlgeschlagene Anmeldeversuche — Lockout 60 s aktiv', { device: 'Desktop (dieses Gerät)' });
+        triggerAlarm('BRUTE_FORCE', '5 failed sign-in attempts — lockout 60 s active', { device: 'Desktop (this device)' });
       }
     } finally {
       setBusy(false);
@@ -812,19 +811,19 @@ export default function App() {
     if (!data) return;
     const targetId = userIdInput.trim().toUpperCase();
     if (!/^RV-[0-9A-F]{4}-[0-9A-F]{4}$/.test(targetId)) {
-      setContactError('Ungültiges Format. Erwartet: RV-XXXX-XXXX'); return;
+      setContactError('Invalid format. Expected: RV-XXXX-XXXX'); return;
     }
-    if (targetId === data.identity.userId) { setContactError('Das ist deine eigene Konto-ID.'); return; }
-    if (data.contacts[targetId]) { setContactError('Dieser Kontakt existiert bereits.'); return; }
+    if (targetId === data.identity.userId) { setContactError('That is your own account ID.'); return; }
+    if (data.contacts[targetId]) { setContactError('This contact already exists.'); return; }
     if (!relayRef.current || relayStatus !== 'online') {
-      setContactError('Relay ist offline — Kontakt-Lookup benötigt eine aktive Verbindung.'); return;
+      setContactError('Relay is offline — contact lookup requires an active connection.'); return;
     }
     setContactBusy(true);
     setContactError('');
     try {
       const res = await relayRef.current.lookup(targetId, true);
       if (!res.found || !res.xPub || !res.prekeyPub || !res.pqPrekeyPub) {
-        setContactError('Konto nicht gefunden. War die Person schon einmal mit RenkerVault online?');
+        setContactError('Account not found. Has the person ever been online with RenkerVault?');
         return;
       }
       const name = nameInput || targetId;
@@ -836,13 +835,13 @@ export default function App() {
       try {
         realChat.beginSession(data.identity, contact, res.otpk ?? undefined);
       } catch {
-        setContactError('Schlüssel-Signatur dieses Kontakts ungültig — Kontakt wurde nicht hinzugefügt (möglicher Relay-Manipulationsversuch).');
+        setContactError('Key signature of this contact is invalid — contact was not added (possible relay tampering attempt).');
         return;
       }
       const sn = safetyNumber(b64.dec(data.identity.xPub), b64.dec(contact.xPub));
       const fp = shortFingerprint(b64.dec(contact.xPub));
       const chat: Chat = {
-        id: targetId, kind: 'direct', origin: 'real', name, sub: 'Neuer Kontakt · noch keine Nachrichten',
+        id: targetId, kind: 'direct', origin: 'real', name, sub: 'New contact · no messages yet',
         members: [
           { id: data.identity.userId, name: data.identity.displayName, role: 'member' },
           { id: targetId, name, role: 'member' },
@@ -857,7 +856,7 @@ export default function App() {
         messages: { ...d.messages, [targetId]: [] },
       } : d);
       persistRealSessions();
-      log(ev('info', 'CONTACT_ADDED', `Echter Kontakt hinzugefügt: ${name} (${targetId}) — Sitzung etabliert`));
+      log(ev('info', 'CONTACT_ADDED', `Real contact added: ${name} (${targetId}) — session established`));
       setShowAddContact(false);
       setView('chats'); setTab('direct'); setActiveChatId(targetId);
     } finally {
@@ -873,7 +872,7 @@ export default function App() {
     members.forEach(async (m) => {
       if (m.id === data.identity.userId) return;
       if (!realChat.hasSession(m.id)) {
-        log(ev('warn', 'GROUP_KEY_UNDELIVERED', `„${groupName}": kein Schlüssel-Kanal zu ${m.name} — erst als Kontakt hinzufügen`));
+        log(ev('warn', 'GROUP_KEY_UNDELIVERED', `"${groupName}": no key channel to ${m.name} — add them as a contact first`));
         return;
       }
       const enc = await realChat.encryptDirect(m.id, data.identity, payloadBytes);
@@ -888,7 +887,7 @@ export default function App() {
 
   const handleCreateGroup = (name: string, memberIds: string[]) => {
     if (!data) return;
-    if (memberIds.length === 0) { setGroupError('Mindestens ein Mitglied einladen.'); return; }
+    if (memberIds.length === 0) { setGroupError('Invite at least one member.'); return; }
     setGroupError('');
     const groupId = uid('grp-');
     const r = realChat.newGroupEpoch(groupId, 0);
@@ -896,7 +895,7 @@ export default function App() {
       { id: data.identity.userId, name: data.identity.displayName, role: 'owner' },
       ...memberIds.map((id) => ({ id, name: data.contacts[id]?.name ?? id, role: 'member' as const })),
     ];
-    const sub = `${members.length} Mitglieder · E2E (Epoche ${r.epoch})`;
+    const sub = `${members.length} members · E2E (epoch ${r.epoch})`;
     const chat: Chat = {
       id: groupId, kind: 'group', origin: 'real', name, sub, members,
       safetyNumber: '', shortFp: r.fp, verified: false, disappearSec: 0,
@@ -904,7 +903,7 @@ export default function App() {
     };
     setData((d) => d ? { ...d, chats: [...d.chats, chat], messages: { ...d.messages, [groupId]: [] } } : d);
     distributeGroupKey(groupId, name, r.epoch, members);
-    log(ev('info', 'GROUP_CREATED', `Echte Gruppe „${name}" erstellt (Epoche ${r.epoch}), Schlüssel an ${memberIds.length} Mitglied(er) verteilt`));
+    log(ev('info', 'GROUP_CREATED', `Real group "${name}" created (epoch ${r.epoch}), key distributed to ${memberIds.length} member(s)`));
     setShowCreateGroup(false);
     setView('chats'); setTab('group'); setActiveChatId(groupId);
   };
@@ -914,14 +913,14 @@ export default function App() {
     const chat = data.chats.find((c) => c.id === chatId);
     if (!chat) return;
     const r = realChat.newGroupEpoch(chatId, chat.epoch);
-    const sub = `${members.length} Mitglieder · E2E (Epoche ${r.epoch})`;
+    const sub = `${members.length} members · E2E (epoch ${r.epoch})`;
     updateChat(chatId, { epoch: r.epoch, shortFp: r.fp, keyRotatedAt: Date.now(), members, sub });
     appendMsg(chatId, {
       id: uid('s'), from: 'system', fromName: 'System',
-      body: `${reasonText} · Schlüssel neu verteilt (Epoche ${r.epoch})`,
+      body: `${reasonText} · key redistributed (epoch ${r.epoch})`,
       ct: '', ts: Date.now(), own: false, kind: 'system',
     });
-    log(ev('info', 'KEY_ROTATION', `„${chat.name}": ${reasonText} → Epoche ${r.epoch}`));
+    log(ev('info', 'KEY_ROTATION', `"${chat.name}": ${reasonText} → epoch ${r.epoch}`));
     distributeGroupKey(chatId, chat.name, r.epoch, members);
   };
 
@@ -931,7 +930,7 @@ export default function App() {
     const contact = data.contacts[contactId];
     if (!chat || !contact) return;
     const members = [...chat.members, { id: contactId, name: contact.name, role: 'member' as const }];
-    rotateRealGroup(chatId, members, `${contact.name} hinzugefügt`);
+    rotateRealGroup(chatId, members, `${contact.name} added`);
   };
 
   const handleRemoveMemberReal = (chatId: string, memberId: string) => {
@@ -940,7 +939,7 @@ export default function App() {
     if (!chat) return;
     const removedName = chat.members.find((m) => m.id === memberId)?.name ?? memberId;
     const members = chat.members.filter((m) => m.id !== memberId);
-    rotateRealGroup(chatId, members, `${removedName} entfernt`);
+    rotateRealGroup(chatId, members, `${removedName} removed`);
   };
 
   const canPostIn = (chat: Chat): boolean => {
@@ -954,7 +953,7 @@ export default function App() {
     const chat = data.chats.find((c) => c.id === chatId);
     if (!chat) return;
     if (!canPostIn(chat)) {
-      log(ev('warn', 'PERMISSION_DENIED', `Senden in „${chat.name}" verweigert — nur Owner/Admins dürfen in Broadcast-Kanälen posten`));
+      log(ev('warn', 'PERMISSION_DENIED', `Posting in "${chat.name}" denied — only owners/admins may post in broadcast channels`));
       return;
     }
 
@@ -1025,7 +1024,7 @@ export default function App() {
       const responder = chat.members.find((m) => m.id !== data.identity.userId);
       if (responder) {
         setTimeout(async () => {
-          const replyText = 'Angekommen — Fingerprint der Epoche stimmt bei mir. ✔';
+          const replyText = 'Received — the epoch fingerprint matches on my side. ✔';
           const rEnc = await demoSendSym(chatId, replyText);
           appendMsg(chatId, {
             id: uid('m'), from: responder.id, fromName: responder.name, body: replyText,
@@ -1041,11 +1040,11 @@ export default function App() {
     const chat = data.chats.find((c) => c.id === chatId);
     if (!chat) return;
     if (!canPostIn(chat)) {
-      log(ev('warn', 'PERMISSION_DENIED', `Senden in „${chat.name}" verweigert — nur Owner/Admins dürfen in Broadcast-Kanälen posten`));
+      log(ev('warn', 'PERMISSION_DENIED', `Posting in "${chat.name}" denied — only owners/admins may post in broadcast channels`));
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      log(ev('warn', 'ATTACH', `Anhang zu groß (max. ${Math.round(MAX_FILE_BYTES / 1024)} KB im Prototyp): ${file.name}`));
+      log(ev('warn', 'ATTACH', `Attachment too large (max. ${Math.round(MAX_FILE_BYTES / 1024)} KB in the prototype): ${file.name}`));
       return;
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -1077,7 +1076,7 @@ export default function App() {
         body: '', ct: '', ts, own: true, kind: 'file', fileName: file.name, fileSize: file.size,
         fileMime: mime, fileDataUrl, forwardedFrom,
       });
-      log(ev('info', 'ATTACH', `Anhang Ende-zu-Ende-verschlüsselt gesendet: ${file.name}`));
+      log(ev('info', 'ATTACH', `Attachment sent end-to-end encrypted: ${file.name}`));
       return;
     }
 
@@ -1087,7 +1086,7 @@ export default function App() {
       body: '', ct: enc.ct, ts: Date.now(), own: true, kind: 'file',
       fileName: file.name, fileSize: file.size, fileMime: mime, fileDataUrl, forwardedFrom,
     });
-    log(ev('info', 'ATTACH', `Anhang Ende-zu-Ende-verschlüsselt gesendet: ${file.name}`));
+    log(ev('info', 'ATTACH', `Attachment sent end-to-end encrypted: ${file.name}`));
   };
 
   const handleEditMessage = async (chatId: string, msgId: string, newText: string) => {
@@ -1181,16 +1180,16 @@ export default function App() {
     if (!m || !data || m.deleted) return;
     if (m.kind === 'file') {
       if (!m.fileDataUrl) {
-        log(ev('warn', 'FORWARD_FAIL', `„${m.fileName ?? 'Anhang'}" kann nicht weitergeleitet werden — nur Bild-/Audio-Anhänge werden dafür lokal vorgehalten`));
+        log(ev('warn', 'FORWARD_FAIL', `"${m.fileName ?? 'Attachment'}" cannot be forwarded — only image/audio attachments are kept locally for this`));
         return;
       }
       try {
         const res = await fetch(m.fileDataUrl);
         const blob = await res.blob();
-        const file = new File([blob], m.fileName ?? 'datei', { type: m.fileMime ?? blob.type });
+        const file = new File([blob], m.fileName ?? 'file', { type: m.fileMime ?? blob.type });
         await handleFile(targetChatId, file, m.fromName);
       } catch {
-        log(ev('warn', 'FORWARD_FAIL', 'Weiterleiten der Datei fehlgeschlagen'));
+        log(ev('warn', 'FORWARD_FAIL', 'Forwarding the file failed'));
       }
       return;
     }
@@ -1223,7 +1222,7 @@ export default function App() {
     });
     setActiveChatId(null);
     log(ev('warn', 'CHAT_BURNED',
-      `„${chat.name}" verbrannt — Verlauf${dropContact ? ' und Verschlüsselungssitzung' : ''} unwiderruflich gelöscht`));
+      `"${chat.name}" burned — history${dropContact ? ' and encryption session' : ''} irreversibly deleted`));
   };
 
   const toggleChatFlag = (chatId: string, flag: 'pinned' | 'muted' | 'archived') => {
@@ -1265,10 +1264,10 @@ export default function App() {
     updateChat(chatId, { epoch: r.epoch, shortFp: r.fp, keyRotatedAt: Date.now() });
     appendMsg(chatId, {
       id: uid('s'), from: 'system', fromName: 'System',
-      body: `${reasonText} · Schlüssel neu verteilt (Epoche ${r.epoch})`,
+      body: `${reasonText} · key redistributed (epoch ${r.epoch})`,
       ct: '', ts: Date.now(), own: false, kind: 'system',
     });
-    log(ev('info', 'KEY_ROTATION', `„${chat.name}": ${reasonText} → Epoche ${r.epoch}`));
+    log(ev('info', 'KEY_ROTATION', `"${chat.name}": ${reasonText} → epoch ${r.epoch}`));
   };
 
   const handleAddMember = (chatId: string, memberId: string) => {
@@ -1280,7 +1279,7 @@ export default function App() {
         ? { ...c, members: [...c.members, { id: memberId, name, role: 'member' as const }] }
         : c),
     } : d);
-    rotateChat(chatId, `${name} hinzugefügt`);
+    rotateChat(chatId, `${name} added`);
   };
 
   const handleRemoveMember = (chatId: string, memberId: string) => {
@@ -1293,7 +1292,7 @@ export default function App() {
         ? { ...c, members: c.members.filter((m) => m.id !== memberId) }
         : c),
     } : d);
-    rotateChat(chatId, `${name} entfernt`);
+    rotateChat(chatId, `${name} removed`);
   };
 
   const rotateChatAny = (chatId: string, reasonText: string) => {
@@ -1317,31 +1316,31 @@ export default function App() {
 
   const runIntegrityCheck = () => {
     const r = checkIntegrity();
-    const label = r === 'ok' ? 'OK' : r === 'tampered' ? 'MANIPULIERT' : r.toUpperCase();
+    const label = r === 'ok' ? 'OK' : r === 'tampered' ? 'TAMPERED' : r.toUpperCase();
     setIntegrityResult(label);
     if (r === 'tampered') {
-      triggerAlarm('TAMPER', 'HMAC-Prüfung fehlgeschlagen — lokale Datenbank wurde manipuliert',
+      triggerAlarm('TAMPER', 'HMAC check failed — local database was tampered with',
         { lockdown: settings.autoLockdown });
     } else {
-      log(ev('info', 'VAULT_CHECK', `Integritätsprüfung der lokalen Datenbank: ${label}`));
+      log(ev('info', 'VAULT_CHECK', `Integrity check of the local database: ${label}`));
     }
   };
 
   const simIntrusion = () => {
-    log(ev('warn', 'AUTH_FAIL', 'Fehlgeschlagener Anmeldeversuch (5/5) — Simulation', 'Unbekanntes Gerät'));
-    triggerAlarm('BRUTE_FORCE', 'Simulation: 5 fehlgeschlagene Login-Versuche in 90 s — Lockout aktiv',
-      { device: 'Unbekanntes Gerät' });
+    log(ev('warn', 'AUTH_FAIL', 'Failed sign-in attempt (5/5) — simulation', 'Unknown device'));
+    triggerAlarm('BRUTE_FORCE', 'Simulation: 5 failed login attempts in 90 s — lockout active',
+      { device: 'Unknown device' });
   };
 
   const simTamper = () => {
     demoTamperVault();
-    log(ev('warn', 'TAMPER_SIM', 'Dev-Simulation: Byte im Vault-Ciphertext manipuliert'));
+    log(ev('warn', 'TAMPER_SIM', 'Dev simulation: byte in the vault ciphertext tampered with'));
     runIntegrityCheck();
   };
 
   const ackAlarm = () => {
     setAlarm(NO_ALARM);
-    log(ev('info', 'ALARM_ACK', 'Alarm quittiert durch Nutzer'));
+    log(ev('info', 'ALARM_ACK', 'Alarm acknowledged by the user'));
   };
 
   const lockNow = async () => {
@@ -1364,7 +1363,7 @@ export default function App() {
     await saveVault(data);
     setIntegrityResult('OK');
     setAlarm(NO_ALARM);
-    log(ev('info', 'VAULT_REPAIR', 'Vault aus intaktem Sitzungszustand neu versiegelt — Integrität wiederhergestellt'));
+    log(ev('info', 'VAULT_REPAIR', 'Vault re-sealed from intact session state — integrity restored'));
     setPhase('main');
   };
 
@@ -1431,22 +1430,22 @@ export default function App() {
         <div className="alarm-vignette" />
         <div className="lockdown-card panel">
           <div className="big">🚨</div>
-          <h1>SICHERHEITSWARNUNG — AUTO-LOCKDOWN</h1>
+          <h1>SECURITY WARNING — AUTO-LOCKDOWN</h1>
           <p>
-            {alarm.reason || 'Manipulation der lokalen Datenbank erkannt.'}<br />
-            Die App wurde gesperrt, um deine Daten zu schützen. Prüfe Gerät und
-            Umgebung, bevor du fortfährst.
+            {alarm.reason || 'Tampering of the local database detected.'}<br />
+            The app was locked to protect your data. Check the device and
+            environment before you continue.
           </p>
           {data ? (
             <button className="btn solid" onClick={repairVault}>
-              Vault aus intakter Sitzung wiederherstellen & fortfahren
+              Restore vault from intact session & continue
             </button>
           ) : (
             <button className="btn dangerous" onClick={destroyAll}>
-              Tresor unwiderruflich löschen & neu beginnen
+              Irreversibly delete the vault & start over
             </button>
           )}
-          <button className="btn ghost" onClick={lockNow}>Sperren & zur Anmeldung</button>
+          <button className="btn ghost" onClick={lockNow}>Lock & go to sign-in</button>
         </div>
       </div>
     );
@@ -1454,11 +1453,11 @@ export default function App() {
 
   const nav: { id: View; ico: string; label: string; tab?: Tab }[] = [
     { id: 'chats', ico: '💬', label: 'Chats', tab: 'direct' },
-    { id: 'chats', ico: '⬡', label: 'Gruppen', tab: 'group' },
-    { id: 'chats', ico: '📡', label: 'Kanäle', tab: 'channel' },
-    { id: 'contacts', ico: '◉', label: 'Kontakte' },
-    { id: 'security', ico: '⛨', label: 'Sicherheitszentrale' },
-    { id: 'settings', ico: '⚙', label: 'Einstellungen' },
+    { id: 'chats', ico: '⬡', label: 'Groups', tab: 'group' },
+    { id: 'chats', ico: '📡', label: 'Channels', tab: 'channel' },
+    { id: 'contacts', ico: '◉', label: 'Contacts' },
+    { id: 'security', ico: '⛨', label: 'Security center' },
+    { id: 'settings', ico: '⚙', label: 'Settings' },
   ];
 
   return (
@@ -1472,13 +1471,13 @@ export default function App() {
           </div>
         </div>
         <div className="hdr-status">
-          <span className="grp"><span className="led on" /> E2E AKTIV</span>
+          <span className="grp"><span className="led on" /> E2E ACTIVE</span>
           <span className="grp">
             <span className={`led ${relayStatus === 'online' ? 'on' : 'off'}`} />
             RELAY {relayStatus === 'online' ? 'ONLINE' : 'OFFLINE'}
           </span>
           <span className="grp mono">{data?.identity.userId}</span>
-          <button className="btn ghost" onClick={lockNow}>🔒 Sperren</button>
+          <button className="btn ghost" onClick={lockNow}>🔒 Lock</button>
         </div>
       </header>
 
@@ -1495,7 +1494,7 @@ export default function App() {
             </button>
           ))}
           <div className="nav-foot">
-            ZERO-KNOWLEDGE-RELAY<br />
+            CONTENT-BLIND RELAY<br />
             DOUBLE RATCHET · X25519<br />
             AES-256-GCM · ARGON2ID
           </div>
@@ -1505,23 +1504,23 @@ export default function App() {
           <section className="list panel">
             <div className="list-head">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="mono tiny dim">GESICHERTE KANÄLE</div>
+                <div className="mono tiny dim">SECURED CHANNELS</div>
                 <button
                   className="btn" style={{ marginLeft: 'auto', padding: '4px 8px' }}
-                  title="Echte Gruppe erstellen" onClick={() => setShowCreateGroup(true)}
+                  title="Create a real group" onClick={() => setShowCreateGroup(true)}
                 >
-                  + Gruppe
+                  + Group
                 </button>
               </div>
               <div className="tabs">
-                {([['all', 'Alle'], ['direct', '1:1'], ['group', 'Gruppen'], ['channel', 'Kanäle'], ['archived', 'Archiv']] as [Tab, string][]).map(([t, l]) => (
+                {([['all', 'All'], ['direct', '1:1'], ['group', 'Groups'], ['channel', 'Channels'], ['archived', 'Archive']] as [Tab, string][]).map(([t, l]) => (
                   <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{l}</button>
                 ))}
               </div>
             </div>
             <div className="search-box">
               <input
-                className="input" placeholder="🔎 Chats & Nachrichten durchsuchen…"
+                className="input" placeholder="🔎 Search chats & messages…"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
@@ -1552,9 +1551,9 @@ export default function App() {
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                       {c.unread > 0 && <span className={`unread ${c.muted ? 'muted' : ''}`}>{c.unread}</span>}
                       <div className="chat-item-menu">
-                        <button className="mbtn" title={c.pinned ? 'Lösen' : 'Anpinnen'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'pinned'); }}>📌</button>
-                        <button className="mbtn" title={c.muted ? 'Ton an' : 'Stummschalten'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'muted'); }}>🔕</button>
-                        <button className="mbtn" title={c.archived ? 'Aus Archiv holen' : 'Archivieren'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'archived'); }}>🗄</button>
+                        <button className="mbtn" title={c.pinned ? 'Unpin' : 'Pin'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'pinned'); }}>📌</button>
+                        <button className="mbtn" title={c.muted ? 'Unmute' : 'Mute'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'muted'); }}>🔕</button>
+                        <button className="mbtn" title={c.archived ? 'Unarchive' : 'Archive'} onClick={(e) => { e.stopPropagation(); toggleChatFlag(c.id, 'archived'); }}>🗄</button>
                       </div>
                     </div>
                   </div>
@@ -1562,7 +1561,7 @@ export default function App() {
               })}
               {filteredChats.length === 0 && (
                 <p className="dim tiny" style={{ padding: 14 }}>
-                  {duress ? 'Keine Unterhaltungen.' : 'Keine Einträge in diesem Filter.'}
+                  {duress ? 'No conversations.' : 'No entries in this filter.'}
                 </p>
               )}
             </div>
@@ -1588,10 +1587,10 @@ export default function App() {
             onToggleCt={() => setShowCt((s) => !s)}
             onSetTimer={(sec) => {
               updateChat(activeChat.id, { disappearSec: sec });
-              log(ev('info', 'TIMER', `„${activeChat.name}": verschwindende Nachrichten ${sec ? `→ ${sec}s` : 'deaktiviert'}`));
+              log(ev('info', 'TIMER', `"${activeChat.name}": disappearing messages ${sec ? `→ ${sec}s` : 'disabled'}`));
             }}
             onToggleVerified={() => updateChat(activeChat.id, { verified: !activeChat.verified })}
-            onRotate={() => rotateChatAny(activeChat.id, 'Manuelle Rotation')}
+            onRotate={() => rotateChatAny(activeChat.id, 'Manual rotation')}
             onAddMember={(id) => addMemberAny(activeChat.id, id)}
             onRemoveMember={(id) => removeMemberAny(activeChat.id, id)}
             onSetPermission={(memberId, patch) => handleSetPermission(activeChat.id, memberId, patch)}
@@ -1611,12 +1610,12 @@ export default function App() {
         ) : (
           <main className="main panel">
             <LockVisual
-              caption={duress ? 'Bereit' : 'Ende-zu-Ende-Verschlüsselung aktiv'}
-              fingerprint={data ? `ID ${data.identity.userId} · GERÄT ${data.identity.deviceName}` : ''}
+              caption={duress ? 'Ready' : 'End-to-end encryption active'}
+              fingerprint={data ? `ID ${data.identity.userId} · DEVICE ${data.identity.deviceName}` : ''}
               stats={[
-                { k: 'Sitzungen', v: String(chats.filter((c) => c.kind === 'direct').length) },
-                { k: 'Gruppen', v: String(chats.filter((c) => c.kind === 'group').length) },
-                { k: 'Kanäle', v: String(chats.filter((c) => c.kind === 'channel').length) },
+                { k: 'Sessions', v: String(chats.filter((c) => c.kind === 'direct').length) },
+                { k: 'Groups', v: String(chats.filter((c) => c.kind === 'group').length) },
+                { k: 'Channels', v: String(chats.filter((c) => c.kind === 'channel').length) },
                 { k: 'Relay', v: relayStatus === 'online' ? 'ONLINE' : 'OFFLINE' },
               ]}
             />
@@ -1647,11 +1646,11 @@ export default function App() {
             onRevoke={(id) => relayRef.current?.revokeDevice(id)}
             onCheckIntegrity={runIntegrityCheck}
             onRotateAll={() => {
-              chats.filter((c) => c.kind !== 'direct').forEach((c) => rotateChatAny(c.id, 'Manuelle Rotation'));
+              chats.filter((c) => c.kind !== 'direct').forEach((c) => rotateChatAny(c.id, 'Manual rotation'));
             }}
             onChangePassphrase={async (oldPass, newPass) => {
               const res = await changePassphrase(oldPass, newPass);
-              if (res.ok) log(ev('info', 'PASSPHRASE_CHANGED', 'Vault-Passphrase geändert'));
+              if (res.ok) log(ev('info', 'PASSPHRASE_CHANGED', 'Vault passphrase changed'));
               return res;
             }}
           />
@@ -1664,11 +1663,11 @@ export default function App() {
             relayStatus={relayStatus}
             onToggle={(key) => {
               setData((d) => d ? { ...d, settings: { ...d.settings, [key]: !d.settings[key] } } : d);
-              log(ev('info', 'SETTINGS', `Einstellung geändert: ${key}`));
+              log(ev('info', 'SETTINGS', `Setting changed: ${key}`));
             }}
             onSetRelayUrl={(url) => {
               setData((d) => d ? { ...d, settings: { ...d.settings, relayUrl: url || DEFAULT_RELAY_URL } } : d);
-              log(ev('info', 'SETTINGS', `Relay-Adresse geändert → ${url || DEFAULT_RELAY_URL}`));
+              log(ev('info', 'SETTINGS', `Relay address changed → ${url || DEFAULT_RELAY_URL}`));
             }}
             onDestroy={destroyAll}
           />

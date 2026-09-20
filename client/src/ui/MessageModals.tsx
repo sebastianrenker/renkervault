@@ -10,7 +10,7 @@ export function ForwardModal(props: {
   return (
     <div className="modal-back" onClick={props.onClose}>
       <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-        <h3>➦ Nachricht weiterleiten</h3>
+        <h3>➦ Forward message</h3>
         <div className="card" style={{ marginBottom: 4 }}>
           <div className="dim tiny">{props.message.fromName}</div>
           <div>{props.message.kind === 'file' ? `📎 ${props.message.fileName}` : props.message.body.slice(0, 160)}</div>
@@ -22,12 +22,12 @@ export function ForwardModal(props: {
             </div>
             <span>{c.name}</span>
             <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => props.onForward(c.id)}>
-              Weiterleiten
+              Forward
             </button>
           </div>
         ))}
-        {targets.length === 0 && <p className="dim tiny">Keine Ziel-Chats verfügbar.</p>}
-        <button className="btn ghost" onClick={props.onClose}>Abbrechen</button>
+        {targets.length === 0 && <p className="dim tiny">No target chats available.</p>}
+        <button className="btn ghost" onClick={props.onClose}>Cancel</button>
       </div>
     </div>
   );

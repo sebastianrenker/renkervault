@@ -23,13 +23,13 @@ export function ContactsPage(props: {
     <main className="main panel">
       <div className="page">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h2 style={{ marginBottom: 0 }}>◉ Kontakte</h2>
+          <h2 style={{ marginBottom: 0 }}>◉ Contacts</h2>
           <button className="btn solid" style={{ marginLeft: 'auto' }} onClick={props.onAddContact}>
-            + Echten Kontakt hinzufügen
+            + Add a real contact
           </button>
         </div>
         <div className="card">
-          <h4>Deine Konto-ID (teile sie, damit andere dich hinzufügen können)</h4>
+          <h4>Your account ID (share it so others can add you)</h4>
           <div className="idbox">{props.myUserId}</div>
         </div>
         {directs.map((c) => (
@@ -38,23 +38,23 @@ export function ContactsPage(props: {
               <div className="avatar">{c.name.slice(0, 2).toUpperCase()}</div>
               <div style={{ flex: 1 }}>
                 <div>
-                  {c.name} {c.verified && <span className="vbadge">✔ verifiziert</span>}{' '}
-                  <span className="dim tiny">{c.origin === 'real' ? '· echter Kontakt' : '· Demo'}</span>
+                  {c.name} {c.verified && <span className="vbadge">✔ verified</span>}{' '}
+                  <span className="dim tiny">{c.origin === 'real' ? '· real contact' : '· demo'}</span>
                 </div>
                 <div className="dim tiny mono">
                   {c.origin === 'real' ? `${c.id} · ` : ''}FP {c.shortFp}
                 </div>
               </div>
               <button className="btn" onClick={() => props.onToggleVerified(c.id)}>
-                {c.verified ? 'Verifizierung zurückziehen' : 'Als verifiziert markieren'}
+                {c.verified ? 'Withdraw verification' : 'Mark as verified'}
               </button>
-              <button className="btn ghost" onClick={() => props.onOpen(c.id)}>Chat öffnen</button>
+              <button className="btn ghost" onClick={() => props.onOpen(c.id)}>Open chat</button>
             </div>
           </div>
         ))}
         <p className="dim tiny">
-          ⚠ Ändert sich der Schlüssel eines Kontakts (z. B. Neuinstallation), wird die
-          Verifizierung automatisch zurückgesetzt und im Security-Log gewarnt.
+          ⚠ If a contact's key changes (e.g. a reinstall), the
+          verification is reset automatically and a warning is logged in the security log.
         </p>
       </div>
     </main>
@@ -70,51 +70,51 @@ export function SettingsPage(props: {
   onDestroy: () => void;
 }) {
   const rows: { key: 'readReceipts' | 'typingIndicator' | 'alarmSound' | 'autoLockdown' | 'coverTraffic'; label: string; desc: string }[] = [
-    { key: 'readReceipts', label: 'Lesebestätigungen', desc: 'Standard AUS. Sendet Metadaten („gelesen um…") an Kontakte — bewusst opt-in.' },
-    { key: 'typingIndicator', label: 'Tippindikator', desc: 'Standard AUS. „schreibt…" ist ein Metadaten-Leck — bewusst opt-in.' },
-    { key: 'coverTraffic', label: 'Tarn-Traffic', desc: 'Standard AN. Sendet in unregelmäßigen Abständen unsichtbare Dummy-Nachrichten an bekannte Kontakte, damit der Relay „wer chattet wann wie oft" schlechter auswerten kann. Kostet etwas Akku/Bandbreite auch im Leerlauf.' },
-    { key: 'alarmSound', label: 'Akustischer Alarm', desc: 'Sirenenton bei Sicherheitswarnungen (zusätzlich zum roten Pulsieren).' },
-    { key: 'autoLockdown', label: 'Auto-Lockdown', desc: 'Bei erkannter Manipulation der lokalen Datenbank sofort sperren und nur den Alarm-Screen zeigen.' },
+    { key: 'readReceipts', label: 'Read receipts', desc: 'Off by default. Sends metadata ("read at…") to contacts — deliberately opt-in.' },
+    { key: 'typingIndicator', label: 'Typing indicator', desc: 'Off by default. "typing…" is a metadata leak — deliberately opt-in.' },
+    { key: 'coverTraffic', label: 'Cover traffic', desc: 'On by default. Sends invisible dummy messages to known contacts at irregular intervals, so that the relay can worse evaluate "who chats when and how often". Costs some battery/bandwidth even when idle.' },
+    { key: 'alarmSound', label: 'Audible alarm', desc: 'A siren sound on security warnings (in addition to the red pulsing).' },
+    { key: 'autoLockdown', label: 'Auto-lockdown', desc: 'On detected tampering of the local database, lock immediately and show only the alarm screen.' },
   ];
   const [relayInput, setRelayInput] = useState(props.settings.relayUrl);
   return (
     <main className="main panel">
       <div className="page">
-        <h2>⚙ Einstellungen</h2>
+        <h2>⚙ Settings</h2>
         <div className="card">
-          <h4>Relay-Server</h4>
+          <h4>Relay server</h4>
           <div className="kv">
             <span className="k">Status</span>
             <span className="v"><span className={`led ${props.relayStatus === 'online' ? 'on' : 'off'}`} /> {props.relayStatus.toUpperCase()}</span>
           </div>
-          <label style={{ display: 'block', margin: '10px 0 4px' }}>Adresse (ws:// oder wss://)</label>
+          <label style={{ display: 'block', margin: '10px 0 4px' }}>Address (ws:// or wss://)</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input className="input" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} placeholder="wss://mein-relay.beispiel.de" />
+            <input className="input" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} placeholder="wss://my-relay.example.com" />
             <button className="btn" onClick={() => props.onSetRelayUrl(relayInput.trim())} disabled={!relayInput.trim()}>
-              Übernehmen
+              Apply
             </button>
           </div>
           {isInsecureRemoteRelay(relayInput) && (
             <div className="gate-err" style={{ marginTop: 8 }}>
-              ⚠ „ws://" zu einem entfernten Server ist unverschlüsselter Transport
-              (Handshake/Metadaten im Klartext sichtbar, z. B. für den Netzbetreiber
-              oder einen Angreifer im selben Netz). Für alles außer{' '}
-              <span className="mono">localhost</span> unbedingt{' '}
-              <span className="mono">wss://</span> mit gültigem TLS-Zertifikat
-              verwenden — siehe deploy/DEPLOYMENT.md.
+              ⚠ "ws://" to a remote server is unencrypted transport
+              (handshake/metadata visible in plaintext, e.g. to the network operator
+              or an attacker on the same network). For anything other than{' '}
+              <span className="mono">localhost</span>, be sure to use{' '}
+              <span className="mono">wss://</span> with a valid TLS certificate
+              — see deploy/DEPLOYMENT.md.
             </div>
           )}
           <p className="dim tiny" style={{ marginTop: 8, lineHeight: 1.6 }}>
-            Für Chats mit anderen müssen alle Beteiligten denselben Relay
-            erreichen können — lokal (<span className="mono">ws://localhost:8787</span>,
-            nur auf diesem Gerät), im selben Netzwerk oder über einen
-            öffentlich erreichbaren Server (dann <span className="mono">wss://</span> mit
-            TLS verwenden, siehe SECURITY.md). Eine Änderung baut die
-            Verbindung neu auf.
+            For chats with others, all participants must be able to reach the same relay
+            — locally (<span className="mono">ws://localhost:8787</span>,
+            only on this device), on the same network, or via a
+            publicly reachable server (then use <span className="mono">wss://</span> with
+            TLS, see SECURITY.md). A change rebuilds the
+            connection.
           </p>
         </div>
         <div className="card">
-          <h4>Privatsphäre & Alarm</h4>
+          <h4>Privacy & alarm</h4>
           {rows.map((r) => (
             <div className="toggle-row" key={r.key}>
               <div>
@@ -132,15 +132,15 @@ export function SettingsPage(props: {
         <div className="card">
           <h4>Backups</h4>
           <p className="dim tiny" style={{ lineHeight: 1.6 }}>
-            RenkerVault legt KEINE Klartext-Cloud-Backups an. Der lokale Tresor ist
-            vollständig verschlüsselt (Argon2id → AES-256-GCM); ein Export wäre nur
-            als clientseitig verschlüsselte Datei sinnvoll — Schlüssel bleibt bei dir.
+            RenkerVault creates NO plaintext cloud backups. The local vault is
+            fully encrypted (Argon2id → AES-256-GCM); an export would only make sense
+            as a client-side-encrypted file — the key stays with you.
           </p>
         </div>
         <div className="card">
-          <h4>Gefahrenzone</h4>
+          <h4>Danger zone</h4>
           <button className="btn dangerous" onClick={props.onDestroy}>
-            Tresor unwiderruflich löschen (alle lokalen Daten)
+            Irreversibly delete the vault (all local data)
           </button>
         </div>
       </div>

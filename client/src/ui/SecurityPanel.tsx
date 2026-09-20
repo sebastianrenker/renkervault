@@ -2,7 +2,7 @@ import { RelayStatus } from '../net/client';
 import { SecEvent } from '../state/types';
 
 const fmt = (ts: number) =>
-  new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 export function SecurityPanel(props: {
   secLog: SecEvent[];
@@ -14,9 +14,9 @@ export function SecurityPanel(props: {
 }) {
   const relayLabel: Record<RelayStatus, [string, string]> = {
     online: ['on', 'ONLINE'],
-    connecting: ['off', 'VERBINDE…'],
-    offline: ['off', 'OFFLINE (LOKAL)'],
-    locked: ['bad', 'GESPERRT'],
+    connecting: ['off', 'CONNECTING…'],
+    offline: ['off', 'OFFLINE (LOCAL)'],
+    locked: ['bad', 'LOCKED'],
   };
   const [led, label] = relayLabel[props.relayStatus];
   const events = [...props.secLog].sort((a, b) => b.ts - a.ts).slice(0, 80);
@@ -32,15 +32,15 @@ export function SecurityPanel(props: {
           <div className="v"><span className={`led ${led}`} /> {label}</div>
         </div>
         <div className="stat">
-          <div className="k">Geräte</div>
-          <div className="v">{props.trustedCount}/{props.deviceCount} vertraut</div>
+          <div className="k">Devices</div>
+          <div className="v">{props.trustedCount}/{props.deviceCount} trusted</div>
         </div>
         <div className="stat">
-          <div className="k">Letzte Rotation</div>
+          <div className="k">Last rotation</div>
           <div className="v">{fmt(props.lastRotation)}</div>
         </div>
         <div className="stat">
-          <div className="k">DB-Integrität</div>
+          <div className="k">DB integrity</div>
           <div className="v">
             <span className={`led ${props.integrity === 'OK' ? 'on' : 'bad'}`} /> {props.integrity}
           </div>

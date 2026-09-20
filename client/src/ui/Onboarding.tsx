@@ -13,9 +13,9 @@ export function CreateVault(props: {
   const [err, setErr] = useState('');
 
   const submit = () => {
-    if (pass.length < 8) return setErr('Passphrase: mindestens 8 Zeichen.');
-    if (pass !== pass2) return setErr('Passphrasen stimmen nicht überein.');
-    if (duress && duress === pass) return setErr('Notfall-PIN darf nicht der Passphrase entsprechen.');
+    if (pass.length < 8) return setErr('Passphrase: at least 8 characters.');
+    if (pass !== pass2) return setErr('Passphrases do not match.');
+    if (duress && duress === pass) return setErr('The duress PIN must not equal the passphrase.');
     setErr('');
     props.onCreate({
       displayName: name.trim() || 'Operator',
@@ -33,24 +33,24 @@ export function CreateVault(props: {
           <div className="sub">RENKER INDUSTRIES — SECURE COMMS DIVISION</div>
         </div>
         <p className="gate-info">
-          Konto ohne Telefonnummer, ohne E-Mail. Deine Identität ist eine lokal
-          erzeugte ID + Schlüsselpaare. Die Passphrase verschlüsselt deinen
-          lokalen Tresor (Argon2id → AES-256-GCM) und verlässt dieses Gerät nie.
+          An account without a phone number, without email. Your identity is a locally
+          generated ID + key pairs. The passphrase encrypts your
+          local vault (Argon2id → AES-256-GCM) and never leaves this device.
         </p>
-        <label>Deine Konto-ID (lokal generiert)</label>
+        <label>Your account ID (locally generated)</label>
         <div className="idbox">{userId}</div>
-        <label>Anzeigename</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. S. Renker" />
-        <label>Passphrase (min. 8 Zeichen)</label>
+        <label>Display name</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. S. Renker" />
+        <label>Passphrase (min. 8 characters)</label>
         <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
-        <label>Passphrase wiederholen</label>
+        <label>Repeat passphrase</label>
         <input className="input" type="password" value={pass2} onChange={(e) => setPass2(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()} />
-        <label>Notfall-PIN (optional, öffnet Fake-Ansicht)</label>
-        <input className="input" type="password" value={duress} onChange={(e) => setDuress(e.target.value)} placeholder="leer = deaktiviert" />
+        <label>Duress PIN (optional, opens a fake view)</label>
+        <input className="input" type="password" value={duress} onChange={(e) => setDuress(e.target.value)} placeholder="empty = disabled" />
         {err && <div className="gate-err">✖ {err}</div>}
         <button className="btn solid" onClick={submit} disabled={props.busy}>
-          {props.busy ? 'Erzeuge Schlüssel…' : 'Tresor erstellen & Schlüssel erzeugen'}
+          {props.busy ? 'Generating keys…' : 'Create vault & generate keys'}
         </button>
       </div>
     </div>
@@ -77,7 +77,7 @@ export function UnlockVault(props: {
           <h1>🛡 Renker<b>Vault</b></h1>
           <div className="sub">RENKER INDUSTRIES — SECURE COMMS DIVISION</div>
         </div>
-        <p className="gate-info">Tresor ist gesperrt. Passphrase eingeben, um lokal zu entschlüsseln.</p>
+        <p className="gate-info">The vault is locked. Enter the passphrase to decrypt locally.</p>
         <label>Passphrase</label>
         <input
           className="input" type="password" value={pass} autoFocus
@@ -87,25 +87,25 @@ export function UnlockVault(props: {
         />
         {props.deviceMismatch && (
           <div className="gate-err">
-            🔒 Dieser Tresor ist an ein anderes Gerät/Windows-Konto gebunden
-            (Hardware-Bindung aktiv) — die Passphrase kann hier korrekt sein
-            und trotzdem nicht reichen.
+            🔒 This vault is bound to a different device/Windows account
+            (hardware binding active) — the passphrase can be correct here
+            and still not be enough.
           </div>
         )}
         {props.kdfError && (
           <div className="gate-err">
-            ⚠ Schlüsselableitung fehlgeschlagen — vermutlich zu wenig
-            Arbeitsspeicher auf diesem Gerät. Kein Hinweis auf eine falsche
-            Passphrase; einfach erneut versuchen oder andere Anwendungen
-            schließen.
+            ⚠ Key derivation failed — probably too little
+            memory on this device. No sign of a wrong
+            passphrase; simply try again or close other
+            applications.
           </div>
         )}
         {props.fails > 0 && !locked && !props.deviceMismatch && !props.kdfError && (
-          <div className="gate-err">✖ Falsche Passphrase ({props.fails}/5 Fehlversuche)</div>
+          <div className="gate-err">✖ Wrong passphrase ({props.fails}/5 failed attempts)</div>
         )}
         {locked && (
           <div className="gate-err">
-            🚨 LOCKOUT AKTIV — zu viele Fehlversuche. Freigabe {new Date(props.lockedUntil).toLocaleTimeString('de-DE')}.
+            🚨 LOCKOUT ACTIVE — too many failed attempts. Unlocks at {new Date(props.lockedUntil).toLocaleTimeString('en-GB')}.
           </div>
         )}
         <button
@@ -113,10 +113,10 @@ export function UnlockVault(props: {
           disabled={locked || props.busy || !pass}
           onClick={() => { props.onUnlock(pass); setPass(''); }}
         >
-          {props.busy ? 'Prüfe (Argon2id)…' : 'Entsperren'}
+          {props.busy ? 'Checking (Argon2id)…' : 'Unlock'}
         </button>
         <button className="btn ghost tiny" onClick={props.onReset}>
-          Tresor unwiderruflich löschen & neu beginnen
+          Irreversibly delete the vault & start over
         </button>
       </div>
     </div>

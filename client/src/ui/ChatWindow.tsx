@@ -2,17 +2,17 @@ import { Fragment, ReactNode, useEffect, useRef, useState } from 'react';
 import { Chat, Identity, Member, MemberPermissions, Message, ReplyRef } from '../state/types';
 
 const TIMERS: { sec: number; label: string }[] = [
-  { sec: 0, label: 'Aus' },
-  { sec: 30, label: '30 Sek.' },
-  { sec: 300, label: '5 Min.' },
-  { sec: 3600, label: '1 Std.' },
-  { sec: 86400, label: '24 Std.' },
+  { sec: 0, label: 'Off' },
+  { sec: 30, label: '30 sec' },
+  { sec: 300, label: '5 min' },
+  { sec: 3600, label: '1 hr' },
+  { sec: 86400, label: '24 hr' },
 ];
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 const fmtTime = (ts: number) =>
-  new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 function QrLike({ data }: { data: string }) {
   const N = 21;
@@ -141,7 +141,7 @@ export function ChatWindow(props: {
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(recChunksRef.current, { type: 'audio/webm' });
-        const file = new File([blob], `sprachnachricht-${Date.now()}.webm`, { type: 'audio/webm' });
+        const file = new File([blob], `voice-message-${Date.now()}.webm`, { type: 'audio/webm' });
         props.onFile(file);
       };
       recorderRef.current = rec;
@@ -150,7 +150,7 @@ export function ChatWindow(props: {
       setRecSeconds(0);
       recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
     } catch {
-      alert('Mikrofonzugriff nicht möglich (Berechtigung verweigert oder nicht verfügbar).');
+      alert('Microphone access not possible (permission denied or unavailable).');
     }
   };
 
@@ -162,15 +162,15 @@ export function ChatWindow(props: {
   };
 
   const kindLabel =
-    chat.kind === 'direct' ? 'Ende-zu-Ende · Double Ratchet'
-    : chat.kind === 'group' ? `Gruppe · E2E · Epoche ${chat.epoch}`
-    : `Kanal · Broadcast · Epoche ${chat.epoch}`;
+    chat.kind === 'direct' ? 'End-to-end · Double Ratchet'
+    : chat.kind === 'group' ? `Group · E2E · epoch ${chat.epoch}`
+    : `Channel · Broadcast · epoch ${chat.epoch}`;
 
   return (
     <main className="main panel">
       <div className="chat-head">
         {props.onBack && (
-          <button className="iconbtn back-btn" title="Zurück zur Chat-Liste" onClick={props.onBack}>‹</button>
+          <button className="iconbtn back-btn" title="Back to chat list" onClick={props.onBack}>‹</button>
         )}
         <div className={`avatar ${chat.kind}`}>
           {chat.kind === 'channel' ? '📡' : chat.kind === 'group' ? '⬡' : chat.name.slice(0, 2).toUpperCase()}
@@ -178,8 +178,8 @@ export function ChatWindow(props: {
         <div className="titles">
           <h2>
             {chat.name}{' '}
-            {chat.verified && <span className="vbadge" title="Safety Number verifiziert">✔ verifiziert</span>}
-            {chat.muted && <span className="dim tiny" title="Stummgeschaltet"> 🔕</span>}
+            {chat.verified && <span className="vbadge" title="Safety number verified">✔ verified</span>}
+            {chat.muted && <span className="dim tiny" title="Muted"> 🔕</span>}
           </h2>
           <div className="fp">
             🔒 {kindLabel} · FP <b>{chat.shortFp}</b>
@@ -190,7 +190,7 @@ export function ChatWindow(props: {
               {props.contactPresence.online
                 ? 'online'
                 : props.contactPresence.lastSeen
-                  ? `zuletzt online ${fmtTime(props.contactPresence.lastSeen)}`
+                  ? `last online ${fmtTime(props.contactPresence.lastSeen)}`
                   : 'offline'}
             </div>
           )}
@@ -198,8 +198,8 @@ export function ChatWindow(props: {
         <div className="chat-actions">
           {props.onCall && (
             <>
-              <button className="iconbtn" onClick={() => props.onCall!('audio')} title="Sprachanruf">📞</button>
-              <button className="iconbtn" onClick={() => props.onCall!('video')} title="Videoanruf">📹</button>
+              <button className="iconbtn" onClick={() => props.onCall!('audio')} title="Voice call">📞</button>
+              <button className="iconbtn" onClick={() => props.onCall!('video')} title="Video call">📹</button>
             </>
           )}
           <select
@@ -207,7 +207,7 @@ export function ChatWindow(props: {
             style={{ width: 'auto', padding: '5px 8px' }}
             value={chat.disappearSec}
             onChange={(e) => props.onSetTimer(Number(e.target.value))}
-            title="Verschwindende Nachrichten"
+            title="Disappearing messages"
           >
             {TIMERS.map((t) => (
               <option key={t.sec} value={t.sec}>⏳ {t.label}</option>
@@ -216,15 +216,15 @@ export function ChatWindow(props: {
           <button
             className={`iconbtn ${props.showCt ? 'active' : ''}`}
             onClick={props.onToggleCt}
-            title="Chiffretext anzeigen (Nachweis der Verschlüsselung)"
+            title="Show ciphertext (proof of encryption)"
           >
             CT
           </button>
-          <button className="iconbtn" onClick={() => setModal('safety')} title="Schlüssel verifizieren">
+          <button className="iconbtn" onClick={() => setModal('safety')} title="Verify keys">
             🛡
           </button>
           {chat.kind !== 'direct' && (
-            <button className="iconbtn" onClick={() => setModal('members')} title="Mitglieder">
+            <button className="iconbtn" onClick={() => setModal('members')} title="Members">
               👥
             </button>
           )}
@@ -238,9 +238,9 @@ export function ChatWindow(props: {
                 setTimeout(() => setBurnConfirm(false), 4000);
               }
             }}
-            title={burnConfirm ? 'Wirklich unwiderruflich löschen? Nochmal klicken zum Bestätigen' : 'Sitzung verbrennen — kompletten Verlauf sofort unwiderruflich löschen'}
+            title={burnConfirm ? 'Really delete irreversibly? Click again to confirm' : 'Burn session — delete the entire history immediately and irreversibly'}
           >
-            {burnConfirm ? '⚠ Sicher?' : '🔥'}
+            {burnConfirm ? '⚠ Sure?' : '🔥'}
           </button>
         </div>
       </div>
@@ -249,10 +249,10 @@ export function ChatWindow(props: {
         <div className="pinned-banner">
           <span className="ico">📌</span>
           <div className="ptxt">
-            <b>{pinnedMsg.fromName}</b>: {pinnedMsg.deleted ? 'Nachricht gelöscht' : pinnedMsg.body.slice(0, 90)}
+            <b>{pinnedMsg.fromName}</b>: {pinnedMsg.deleted ? 'Message deleted' : pinnedMsg.body.slice(0, 90)}
           </div>
           {canPin && (
-            <button className="iconbtn" title="Lösen" onClick={() => props.onPinMessage(null)}>✕</button>
+            <button className="iconbtn" title="Unpin" onClick={() => props.onPinMessage(null)}>✕</button>
           )}
         </div>
       )}
@@ -266,21 +266,21 @@ export function ChatWindow(props: {
           >
             {m.kind !== 'system' && (
               <div className="msg-actionbar">
-                <button className="mbtn" title="Reagieren" onClick={() => setReactPickerFor(reactPickerFor === m.id ? null : m.id)}>😊</button>
-                <button className="mbtn" title="Antworten" onClick={() => startReply(m)}>↩</button>
-                <button className="mbtn" title="Weiterleiten" onClick={() => props.onForward(m)}>➦</button>
+                <button className="mbtn" title="React" onClick={() => setReactPickerFor(reactPickerFor === m.id ? null : m.id)}>😊</button>
+                <button className="mbtn" title="Reply" onClick={() => startReply(m)}>↩</button>
+                <button className="mbtn" title="Forward" onClick={() => props.onForward(m)}>➦</button>
                 {!m.deleted && (
-                  <button className="mbtn" title="Kopieren" onClick={() => navigator.clipboard?.writeText(m.body)}>⧉</button>
+                  <button className="mbtn" title="Copy" onClick={() => navigator.clipboard?.writeText(m.body)}>⧉</button>
                 )}
                 {canPin && (
-                  <button className="mbtn" title={chat.pinnedMessageId === m.id ? 'Lösen' : 'Anheften'}
+                  <button className="mbtn" title={chat.pinnedMessageId === m.id ? 'Unpin' : 'Pin'}
                     onClick={() => props.onPinMessage(chat.pinnedMessageId === m.id ? null : m.id)}>📌</button>
                 )}
                 {m.own && !m.deleted && m.kind === 'text' && (
-                  <button className="mbtn" title="Bearbeiten" onClick={() => startEdit(m)}>✎</button>
+                  <button className="mbtn" title="Edit" onClick={() => startEdit(m)}>✎</button>
                 )}
                 {(m.own || isOwner) && !m.deleted && (
-                  <button className="mbtn dangerous" title="Löschen" onClick={() => props.onDeleteMessage(m.id)}>🗑</button>
+                  <button className="mbtn dangerous" title="Delete" onClick={() => props.onDeleteMessage(m.id)}>🗑</button>
                 )}
               </div>
             )}
@@ -296,7 +296,7 @@ export function ChatWindow(props: {
                 <div className="who">{m.fromName}</div>
               )}
               {m.forwardedFrom && !m.deleted && (
-                <div className="fwd-tag">➦ Weitergeleitet von {m.forwardedFrom}</div>
+                <div className="fwd-tag">➦ Forwarded from {m.forwardedFrom}</div>
               )}
               {m.replyTo && !m.deleted && (
                 <div className="quote">
@@ -305,7 +305,7 @@ export function ChatWindow(props: {
                 </div>
               )}
               {m.deleted ? (
-                <span className="deleted-note">🗑 Nachricht gelöscht</span>
+                <span className="deleted-note">🗑 Message deleted</span>
               ) : m.kind === 'file' ? (
                 m.fileMime?.startsWith('image/') && m.fileDataUrl ? (
                   <img src={m.fileDataUrl} alt={m.fileName} className="msg-image" />
@@ -315,7 +315,7 @@ export function ChatWindow(props: {
                     <audio controls src={m.fileDataUrl} />
                   </div>
                 ) : (
-                  <div className="filechip">📎 {m.fileName} <span className="dim">({Math.round((m.fileSize ?? 0) / 1024)} KB · verschlüsselt)</span></div>
+                  <div className="filechip">📎 {m.fileName} <span className="dim">({Math.round((m.fileSize ?? 0) / 1024)} KB · encrypted)</span></div>
                 )
               ) : (
                 renderRichText(m.body, chat.members)
@@ -342,8 +342,8 @@ export function ChatWindow(props: {
             {m.kind !== 'system' && (
               <div className="foot">
                 <span>{fmtTime(m.ts)}</span>
-                {m.edited && !m.deleted && <span title="bearbeitet">bearbeitet</span>}
-                {m.expiresAt && <span title="verschwindet automatisch">⏳</span>}
+                {m.edited && !m.deleted && <span title="edited">edited</span>}
+                {m.expiresAt && <span title="disappears automatically">⏳</span>}
                 {m.own && (
                   <span>{props.readReceipts && m.readByPeer ? '✓✓' : '✓'}</span>
                 )}
@@ -354,7 +354,7 @@ export function ChatWindow(props: {
         <div ref={endRef} />
       </div>
 
-      {props.typingFrom && <div className="typing">▸ {props.typingFrom} schreibt…</div>}
+      {props.typingFrom && <div className="typing">▸ {props.typingFrom} is typing…</div>}
 
       {canPost ? (
         <>
@@ -362,16 +362,16 @@ export function ChatWindow(props: {
             <div className="compose-context">
               <div className="cc-txt">
                 {editingId ? (
-                  <><b>Nachricht bearbeiten</b></>
+                  <><b>Edit message</b></>
                 ) : (
-                  <><b>Antwort an {replyingTo!.fromName}</b><div className="dim">{replyingTo!.body.slice(0, 90)}</div></>
+                  <><b>Reply to {replyingTo!.fromName}</b><div className="dim">{replyingTo!.body.slice(0, 90)}</div></>
                 )}
               </div>
               <button className="iconbtn" onClick={() => { setReplyingTo(null); setEditingId(null); setText(''); }}>✕</button>
             </div>
           )}
           <div className="composer">
-            <button className="iconbtn" title="Verschlüsselten Anhang senden" onClick={() => fileRef.current?.click()}>
+            <button className="iconbtn" title="Send encrypted attachment" onClick={() => fileRef.current?.click()}>
               📎
             </button>
             <input
@@ -386,53 +386,53 @@ export function ChatWindow(props: {
             />
             <input
               className="input"
-              placeholder={`Verschlüsselte Nachricht an ${chat.name}…`}
+              placeholder={`Encrypted message to ${chat.name}…`}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}
             />
             {recording ? (
               <button className="btn dangerous" onClick={stopRecording}>
-                ⏺ {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:{String(recSeconds % 60).padStart(2, '0')} · Stopp
+                ⏺ {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:{String(recSeconds % 60).padStart(2, '0')} · Stop
               </button>
             ) : (
-              <button className="iconbtn" title="Sprachnachricht aufnehmen" onClick={startRecording}>🎤</button>
+              <button className="iconbtn" title="Record voice message" onClick={startRecording}>🎤</button>
             )}
-            <button className="btn solid" onClick={submit}>{editingId ? 'Speichern' : 'Senden 🔒'}</button>
+            <button className="btn solid" onClick={submit}>{editingId ? 'Save' : 'Send 🔒'}</button>
           </div>
         </>
       ) : (
-        <div className="composer-note">📡 Broadcast-Kanal — nur Owner/Admins können senden. Du liest mit.</div>
+        <div className="composer-note">📡 Broadcast channel — only owners/admins can post. You are reading along.</div>
       )}
 
       {modal === 'safety' && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-            <h3>🛡 Schlüssel verifizieren — {chat.name}</h3>
+            <h3>🛡 Verify keys — {chat.name}</h3>
             {chat.kind === 'direct' ? (
               <>
                 <p className="gate-info">
-                  Vergleiche diese Safety Number über einen zweiten Kanal (persönlich,
-                  Telefonat) mit {chat.name}. Stimmt sie überein, ist kein
-                  Man-in-the-Middle zwischen euch.
+                  Compare this safety number over a second channel (in person,
+                  phone call) with {chat.name}. If it matches, there is no
+                  man-in-the-middle between you.
                 </p>
                 <QrLike data={chat.safetyNumber} />
                 <div className="sn">{chat.safetyNumber}</div>
                 <button className="btn" onClick={props.onToggleVerified}>
-                  {chat.verified ? 'Verifizierung zurückziehen' : 'Als verifiziert markieren ✔'}
+                  {chat.verified ? 'Withdraw verification' : 'Mark as verified ✔'}
                 </button>
               </>
             ) : (
               <>
                 <p className="gate-info">
-                  Gruppen-/Kanal-Fingerprint der aktuellen Schlüssel-Epoche. Bei jeder
-                  Mitgliederänderung wird der Schlüssel automatisch rotiert (neue Epoche).
+                  Group/channel fingerprint of the current key epoch. On every
+                  membership change the key is rotated automatically (new epoch).
                 </p>
-                <div className="sn mono">Epoche {chat.epoch} · FP {chat.shortFp}</div>
-                <button className="btn" onClick={props.onRotate}>Schlüssel jetzt rotieren ⟳</button>
+                <div className="sn mono">Epoch {chat.epoch} · FP {chat.shortFp}</div>
+                <button className="btn" onClick={props.onRotate}>Rotate keys now ⟳</button>
               </>
             )}
-            <button className="btn ghost" onClick={() => setModal(null)}>Schließen</button>
+            <button className="btn ghost" onClick={() => setModal(null)}>Close</button>
           </div>
         </div>
       )}
@@ -440,11 +440,11 @@ export function ChatWindow(props: {
       {modal === 'members' && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-            <h3>👥 Mitglieder — {chat.name}</h3>
+            <h3>👥 Members — {chat.name}</h3>
             {chat.kind === 'channel' && (
               <p className="gate-info">
-                Broadcast-Kanal · {chat.subscriberCount ?? 0} Abonnenten (read-only).
-                Hier verwaltest du Owner/Admins.
+                Broadcast channel · {chat.subscriberCount ?? 0} subscribers (read-only).
+                Here you manage owners/admins.
               </p>
             )}
             {chat.members.map((m) => (
@@ -453,11 +453,11 @@ export function ChatWindow(props: {
                   <div className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
                     {m.name.slice(0, 2).toUpperCase()}
                   </div>
-                  <span>{m.name}{m.id === identity.userId ? ' (du)' : ''}</span>
+                  <span>{m.name}{m.id === identity.userId ? ' (you)' : ''}</span>
                   <span className={`role ${m.role}`}>{m.role}</span>
                   {canRemove && m.id !== identity.userId && m.role !== 'owner' && (
                     <button className="btn dangerous tiny" onClick={() => props.onRemoveMember(m.id)}>
-                      Entfernen
+                      Remove
                     </button>
                   )}
                 </div>
@@ -470,7 +470,7 @@ export function ChatWindow(props: {
                           checked={m.permissions?.[p] ?? true}
                           onChange={(e) => props.onSetPermission(m.id, { [p]: e.target.checked })}
                         />
-                        {{ canPost: 'Senden', canInvite: 'Einladen', canRemove: 'Entfernen', canPin: 'Anheften' }[p]}
+                        {{ canPost: 'Post', canInvite: 'Invite', canRemove: 'Remove', canPin: 'Pin' }[p]}
                       </label>
                     ))}
                   </div>
@@ -479,22 +479,22 @@ export function ChatWindow(props: {
             ))}
             {canInvite && addable.length > 0 && (
               <>
-                <h3 style={{ marginTop: 6 }}>Hinzufügen</h3>
+                <h3 style={{ marginTop: 6 }}>Add</h3>
                 {addable.map((c) => (
                   <div className="member-row" key={c.id}>
                     <span>{c.name}</span>
                     <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => props.onAddMember(c.id)}>
-                      + Hinzufügen
+                      + Add
                     </button>
                   </div>
                 ))}
               </>
             )}
             <p className="gate-info tiny">
-              ⟳ Jede Mitgliederänderung löst eine Schlüssel-Neuverteilung aus
-              (neue Epoche) — Entfernte lesen nichts Späteres mehr mit.
+              ⟳ Every membership change triggers a key redistribution
+              (new epoch) — removed members can no longer read anything later.
             </p>
-            <button className="btn ghost" onClick={() => setModal(null)}>Schließen</button>
+            <button className="btn ghost" onClick={() => setModal(null)}>Close</button>
           </div>
         </div>
       )}
