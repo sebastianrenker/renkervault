@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://sebastianrenker.github.io/renkervault/sitemap.xml
