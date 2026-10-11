@@ -21,12 +21,12 @@ export function AddContactModal(props: {
         </p>
         <label>Account ID</label>
         <input
-          className="input mono" placeholder="RV-XXXX-XXXX" value={userId}
+          className="input mono" aria-label="Account ID" placeholder="RV-XXXX-XXXX" value={userId}
           onChange={(e) => setUserId(e.target.value.toUpperCase())}
           autoFocus
         />
         <label>Display name for this contact</label>
-        <input className="input" placeholder="e.g. Nadja" value={name} onChange={(e) => setName(e.target.value)}
+        <input className="input" aria-label="Display name for this contact" placeholder="e.g. Nadja" value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && userId && props.onSubmit(userId.trim(), name.trim())} />
         {props.error && <div className="gate-err">✖ {props.error}</div>}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -66,7 +66,7 @@ export function CreateGroupModal(props: {
       <div className="modal panel" onClick={(e) => e.stopPropagation()}>
         <h3>⬡ Create a real group</h3>
         <label>Group name</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <input className="input" aria-label="Group name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         <p className="gate-info tiny">
           The group key is distributed to each selected member individually over
           your existing 1:1 session (sender-keys-lite). Only

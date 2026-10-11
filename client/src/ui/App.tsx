@@ -1520,7 +1520,7 @@ export default function App() {
             </div>
             <div className="search-box">
               <input
-                className="input" placeholder="🔎 Search chats & messages…"
+                className="input" aria-label="Search chats and messages" placeholder="🔎 Search chats & messages…"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
