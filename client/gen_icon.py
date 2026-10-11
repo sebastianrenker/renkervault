@@ -1,7 +1,6 @@
 """Generates the RenkerVault shield icon in all sizes/formats required by
 Tauri/Windows from a single vector drawing (pure Pillow, no SVG renderer needed).
 """
-import math
 from PIL import Image, ImageDraw
 
 BG = (10, 15, 13, 255)        # Graphite (--bg)
