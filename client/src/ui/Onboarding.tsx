@@ -40,14 +40,14 @@ export function CreateVault(props: {
         <label>Your account ID (locally generated)</label>
         <div className="idbox">{userId}</div>
         <label>Display name</label>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. S. Renker" />
+        <input className="input" aria-label="Display name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. S. Renker" />
         <label>Passphrase (min. 8 characters)</label>
-        <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+        <input className="input" type="password" aria-label="Passphrase" value={pass} onChange={(e) => setPass(e.target.value)} />
         <label>Repeat passphrase</label>
-        <input className="input" type="password" value={pass2} onChange={(e) => setPass2(e.target.value)}
+        <input className="input" type="password" aria-label="Repeat passphrase" value={pass2} onChange={(e) => setPass2(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <label>Duress PIN (optional, opens a fake view)</label>
-        <input className="input" type="password" value={duress} onChange={(e) => setDuress(e.target.value)} placeholder="empty = disabled" />
+        <input className="input" type="password" aria-label="Duress PIN (optional)" value={duress} onChange={(e) => setDuress(e.target.value)} placeholder="empty = disabled" />
         {err && <div className="gate-err">✖ {err}</div>}
         <button className="btn solid" onClick={submit} disabled={props.busy}>
           {props.busy ? 'Generating keys…' : 'Create vault & generate keys'}
@@ -80,7 +80,7 @@ export function UnlockVault(props: {
         <p className="gate-info">The vault is locked. Enter the passphrase to decrypt locally.</p>
         <label>Passphrase</label>
         <input
-          className="input" type="password" value={pass} autoFocus
+          className="input" type="password" aria-label="Passphrase" value={pass} autoFocus
           disabled={locked || props.busy}
           onChange={(e) => setPass(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && pass) { props.onUnlock(pass); setPass(''); } }}

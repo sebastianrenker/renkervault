@@ -378,6 +378,7 @@ export function ChatWindow(props: {
               ref={fileRef}
               type="file"
               hidden
+              aria-label="Attach encrypted file"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) props.onFile(f);
@@ -386,6 +387,7 @@ export function ChatWindow(props: {
             />
             <input
               className="input"
+              aria-label="Message"
               placeholder={`Encrypted message to ${chat.name}…`}
               value={text}
               onChange={(e) => setText(e.target.value)}

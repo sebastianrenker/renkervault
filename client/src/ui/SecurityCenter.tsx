@@ -118,11 +118,11 @@ export function SecurityCenter(props: {
             Changes only the passphrase that unlocks the vault — existing
             contacts, sessions, and messages are kept unchanged.
           </p>
-          <input className="input" type="password" placeholder="Current passphrase"
+          <input className="input" type="password" aria-label="Current passphrase" placeholder="Current passphrase"
             value={oldPass} onChange={(e) => setOldPass(e.target.value)} style={{ marginBottom: 8 }} />
-          <input className="input" type="password" placeholder="New passphrase (min. 8 characters)"
+          <input className="input" type="password" aria-label="New passphrase" placeholder="New passphrase (min. 8 characters)"
             value={newPass} onChange={(e) => setNewPass(e.target.value)} style={{ marginBottom: 8 }} />
-          <input className="input" type="password" placeholder="Repeat new passphrase"
+          <input className="input" type="password" aria-label="Repeat new passphrase" placeholder="Repeat new passphrase"
             value={newPass2} onChange={(e) => setNewPass2(e.target.value)} style={{ marginBottom: 8 }} />
           <button className="btn" disabled={ppBusy || !oldPass || !newPass} onClick={submitPassphraseChange}>
             {ppBusy ? 'Changing…' : 'Change passphrase'}

@@ -89,7 +89,7 @@ export function SettingsPage(props: {
           </div>
           <label style={{ display: 'block', margin: '10px 0 4px' }}>Address (ws:// or wss://)</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input className="input" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} placeholder="wss://my-relay.example.com" />
+            <input className="input" aria-label="Relay server URL" value={relayInput} onChange={(e) => setRelayInput(e.target.value)} placeholder="wss://my-relay.example.com" />
             <button className="btn" onClick={() => props.onSetRelayUrl(relayInput.trim())} disabled={!relayInput.trim()}>
               Apply
             </button>
